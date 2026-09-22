@@ -369,12 +369,6 @@ evaluate_math() {
 process_input() {
 	local args=()
 
-	#local parsed
-	#if ! parsed=$(getopt -o f:w:qivh -l from:,to:,width:,prec:,quiet,interactive,verbose,help -n 'bitcalc' -- "$@"); then
-	#	exit 1
-	#fi
-	#eval set -- "$parsed"
-
 	while [[ $# -gt 0 ]]; do
 		case "$1" in
 			-f|--from)	FROM_BASE="$2"; shift 2 ;;
@@ -384,8 +378,7 @@ process_input() {
 			-q|--quiet)	QUIET=1; VERBOSE=0; shift ;;
 			-i|--interactive)	INTERACTIVE=1; shift ;;
 			-h|--help)	usage ;;
-			#--)		shift; break ;;
-			*)		args+=("$1"); shift ;; #break ;;
+			*)		args+=("$1"); shift ;;
 		esac
 	done
 
@@ -428,6 +421,7 @@ start_repl() {
 			break
 		elif [[ "$line" == "clear" ]]; then
 			clear
+			continue
 		fi
 		[[ -z "$line" ]] && continue
 
