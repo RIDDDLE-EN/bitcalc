@@ -1,0 +1,423 @@
+#!/usr/bin/bash
+
+set -euo pipefail
+
+FROM_BASE=""
+TO_BASE="dec"
+WIDTH=8
+PRECISION=8
+VERBOSE=1
+QUIET=0
+INTERACTIVE=0
+
+BOLD="\033[1m"
+GREEN="\033[32m"
+CYAN="\033[36m"
+YELLOW="\033[33m"
+RED="\033[31m"
+RESET="\033[0m"
+
+rational_re="^-?[0-9]+\.[0-9]+$"
+
+error_exit() {
+	echo -e "${RED}Error:${RESET} $1" >&2
+	exit 1
+}
+
+usage() {
+	cat << 'EOF'
+BITCALC(1)			User Commands			BITCALC(1)
+
+NAME
+	bitcalc - Bitwise operations and base conversions utility
+
+SYNOPSIS
+	bitcalc [FLAGS] <NUMBER>
+	bitcalc [FLAGS] <NUMBER> <OPERATOR> <NUMBER>
+	bitcalc [FLAGS] NOT <NUMBER>
+	echo "<EXPRESSION>" | bitcalc [FLAGS]
+	bitcalc -i | --interactive
+
+DESCRIPTION
+	bitcalc is a hardware engineerng toolkit for executing binary arithmetic, base conversions, and step-by-step bitwise visualizations.
+
+FLAGS:
+	-f, --from <base> 	Input base: bin (2), oct (8), dec (10), hex (16)
+	-t, --to <base>   	Output base: bin (2), oct (8), dec (10), hex (16), bcd, gray
+	-w, --width <bits>	Set register bit-width (8, 16, 32, 64) for bounds and padding. Default: 8
+	--prec <bits>		Precision depth for fractional binary converstion. Default: 8
+	-q, --quiet	  	Output only the final value (ideal for scripting)
+	-i, --interactive	Launch the REPL interactive shell
+	-h, --help	  	Display this help manual
+
+OPERATORS:
+	Binary Math:		ADD, SUB, MUL, DIV
+	Bitwise Logic:		AND, OR, XOR, NOT, LSHIFT, RSHIFT
+	MCU Manipulation:	ROLL, ROR
+	Unary Operations: 	NOT, 1COMP, 2COMP, BSWAP, POPCNT
+
+EXAMPLES:
+	bitcalc --from hex --to bin 85
+	bitcalc 10 AND 12
+	bitcalc -v 0b1010 XOR 0b1100
+	bitcalc NOT 0b10101011 --pad 8
+	bitcalc -w 8 --to 2comp -10
+	bitcalc -w 8 0b010000001 ROL 1
+	bitcalc -w 16 0xABCD BSWAP
+	bitcalc 0b10110110 POPCNT
+	bitcalc -v 0b1011 ADD 0b0110bitcalc 10 LSHIFT 2 | bitcalc -t hex
+EOF
+	exit 0
+}
+
+validate_input() {
+	local val="$1"
+	local base="$2"
+
+	case "$base" in
+		bin|2)
+			if [[ ! "$val" =~ ^[01]+(\.[01]+)?$ ]]; then
+				error_exit "'$val' contains invalid binary digits. Expected only 0 or 1."
+			fi
+			;;
+		oct|8)
+			if [[ ! "$val" =~ ^[0-7]+$ ]]; then
+				error_exit "'$val' contains invalid octal digits. Expected 0-7."
+			fi
+			;;
+		hex|16)
+			if [[ ! "$val" =~ ^[0-9a-fA-F]+$ ]]; then
+				error_exit "'$val' contains invalid hexadecimal digits. Expected 1-9 and / or A-F."
+			fi
+			;;
+		dec|10)
+			if [[ ! "$val" =~ ^-?[0-9]+(\.[0-9]+)?$ ]]; then
+				error_exit "'$val' contains invalid decimal digits. Expected only 1-9."
+			fi
+			;;
+	esac
+}
+
+parse_to_dec() {
+	local val="$1"
+	local base_hint="$FROM_BASE"
+
+	if [[ -z "$base_hint" ]]; then
+		if [[ "$val" =~ ^0[bB][01]+$ ]]; then
+			val="${val:2}"
+			base_hint="bin"
+		elif [[ "$val" =~ ^0[xX][0-9a-fA-F]+$ ]]; then
+			val="${val:2}"
+			base_hint="hex"
+		elif [[ "$val" =~ ^0[oO][0-7]+$ ]]; then
+			val="${val:2}"
+			base_hint="oct"
+		else
+			base_hint="dec"
+		fi
+	fi
+
+	validate_input "$val" "$base_hint"
+
+	case "$base_hint" in
+		bin|2)	echo "$((2#$val))" ;;
+		oct|8)	echo "$((8#$val))" ;;
+		hex|16)	echo "$((16#$val))" ;;
+		dec|10)	echo "$val" ;;
+		*)
+			echo -e "${YELLOW}Error:${RESET} Invalid base '$base_hint'" >&2
+			exit 1
+			;;
+	esac
+}
+
+dec_to_bin() {
+	local n=$1
+	local pad=$2
+	local res=""
+
+	if [ "$n" -eq 0 ]; then
+		res="0"
+	else
+		local val=$n
+		while [ "$val" -gt 0 ]; do
+			res="$(( val & 1 ))$res"
+			val=$(( val >> 1 ))
+		done
+	fi
+
+	while [ "${#res}" -lt "$pad" ]; do
+		res="0$res"
+	done
+	echo "$res"
+}
+
+dec_to_bin_frac() {
+	local frac_str="$1"
+	local prec="$2"
+	local len="${#frac_str}"
+	local scale=$(( 10 ** len ))
+	local val=$(( 10#$frac_str ))
+	local res=""
+
+	for (( i=0; i<prec; i++ )); do
+		val=$(( val * 2 ))
+		if [[ $val -ge $scale ]]; then
+			res="${res}1"
+			val=$(( val - scale ))
+		else
+			res="${res}0"
+		fi
+		[[ $val -eq 0 ]] && break
+	done
+	echo "$res"
+}
+
+int_frac_sep() {
+	dec=$1
+	int_part="${dec%.*}"
+	frac_part="${dec#*.}"
+
+	bin_int=$(dec_to_bin "$int_part" "$PAD")
+	bin_frac=$(dec_to_bin_frac "$frac_part" "$PRECISION")
+	echo "${bin_int}.${bin_frac}"
+}
+
+to_bcd() {
+	local dec_str="$1"
+	local bcd_out=""
+	for (( i=0; i<${#dec_str}; i++ )); do
+		local digit="${dec_str:$i:1}"
+		local bin
+		bin=$(dec_to_bin "$digit" 4)
+		bcd_out="${bcd_out}${bin} "
+	done
+	echo "$bcd_out"
+}
+
+bin_to_gray() {
+	local n=$1
+	echo "$(( n ^ (n >> 1) ))"
+}
+
+popcount() {
+	local n=$1
+	local count=0
+	while [ "$n" -gt 0 ]; do
+		count=$(( count + (n & 1) ))
+		n=$(( n >> 1 ))
+	done
+	echo "$count"
+}
+
+bswap() {
+	local val=$1
+	local w=$WIDTH
+	case $w in
+		16) echo "$(( ((val & 0xFF) << 8) | ((val >> 8) & 0xFF) ))" ;;
+		32) echo "$(( ((val &0xFF) << 24) | (((val >> 8) & 0xFF) << 16) | (((val >> 16) & 0xFF) << 8) | ((val >> 24) & 0xFF) ))" ;;
+		*) error_exit "BSWAP requires --width 16 or 32." ;;
+	esac
+}
+
+rol() {
+	local val=$1
+	local shift=$2
+	local mask=$(( (1 << WIDTH) -1 ))
+	shift=$(( shift % WIDTH ))
+	echo "$(( ((val << shift) | (val >> (WIDTH - shift))) & mask ))"
+}
+
+ror() {
+	local val=$1
+	local shift=$2
+	local mask=$(( (1 << WIDTH) -1 ))
+	shift=$(( shift % WIDTH ))
+	echo "$(( ((val >> shift) | (val << (WIDTH - shift))) & mask ))"
+}
+
+quiet_output() {
+	local result="$1"
+	local dec_val=$result
+	case "$TO_BASE" in
+		bin|2)	printf "0b%b\n" $(dec_to_bin "$dec_val" "$PAD") ;;
+		hex|16)	printf "0x%X\n" "$dec_val" ;;
+		oct|8)	printf "0o%o\n" "$dec_val" ;;
+		dec|10)	printf "%d\n" "$dec_val" ;;
+		bcd)	printf "%s " $(to_bcd "$dec_val") ;;
+		gray)	printf "%b\n" $(dec_to_bin "$(bin_to_gray "$dec_val")" "$PAD") ;;
+		1COMP)	printf "%b\n" "$result" ;;
+		2COMP)	printf "%b\n" "$result" ;;
+		*)	printf "%d\n" "$dec_val" ;;
+	esac
+}
+
+q_output() {
+	local result="$1"
+	printf "%s " $result
+	exit 0
+}
+
+unary_v_output() {
+	local num_raw=$1
+	local op="$2"
+	local result=$3
+	local num_bin
+
+	if [[ "$num_raw" =~ ^-[0-9]+$ && "$op" == "2COMP" ]]; then
+		num=$(( -num_raw ))
+		num_bin=$(dec_to_bin "$num" "$WIDTH")
+		local mask=$(( (1 << WIDTH) - 1 ))
+		local comp1_dec=$(( (~num) & mask ))
+		local comp1_bin=$(dec_to_bin "$comp1_dec" "$WIDTH")
+		echo -e "${CYAN}${num_raw}${RESET}"
+		echo -e "${CYAN}${num}${RESET}	-> (${num_bin})"
+		echo -e "${CYAN}1sCompliment(${comp1_dec})${RESET}	-> (${comp1_bin})"
+		echo -e "			  	 + 1"
+		num_bin=$(dec_to_bin "$result" "$WIDTH")
+		num_raw=$num
+	else
+		num_bin=$(dec_to_bin "$num_raw" "$WIDTH")
+		echo -e "${CYAN}${num_raw}${RESET}	-> (${num_bin})"
+	fi
+
+	if [[ "$op" == "BCD" ]]; then
+		echo -e "${BOLD}$op $num_raw${RESET}	-> ${GREEN}${result}${RESET}"
+		exit 0
+	fi
+	echo -e "${BOLD}............................................${RESET}"
+	echo -e "${BOLD}$op $num_raw${RESET} 	-> ${GREEN}${num_bin}${RESET}"
+	echo -e "${GREEN}$num_bin=>${RESET}	->${BOLD}($result)${RESET}"
+}
+
+eval_unary() {
+	local op="$1"
+	local num_raw="$2"
+
+	local num
+	num=$(parse_to_dec "$num_raw")
+	local mask=$(( (1 << WIDTH) - 1 ))
+	local result=0
+
+	case "$op" in 
+		NOT) 	result=$(( (~num) & mask )) ;;
+		1COMP) 	result=$(( (~num) & mask )) ;;
+		2COMP)	result=$(( ((~-num) + 1) & mask )) ;;
+		POPCNT)	result=$(popcount "$num") ;;
+		BSWAP) 	result=$(bswap "$num") ;;
+		GRAY) 	result=$(bin_to_gray "$num") ;;
+		BCD) 	result=$(to_bcd "$num") ;;
+		*)	error_exit "Unknown unary operator '$op'" ;;
+	esac
+
+	if [[ QUIET -eq 0 && $VERBOSE -eq 1 ]]; then
+		unary_v_output "$num_raw" "$op" "$result"
+	else
+		q_output "$result"
+	fi
+}
+
+eval_binary(){
+	local A_RAW="$1"
+	local OP="$2"
+	local B_RAW="$3"
+
+	local A B RESULT
+	A=$(parse_to_dec "$A_RAW")
+	B=$(parse_to_dec "$B_RAW")
+	local mask=$(( (1 << WIDTH) - 1 ))
+
+	case "$OP" in
+		AND)	RESULT=$(( (A & B) & mask )) ;;
+		OR)	RESULT=$(( (A | B) & mask )) ;;
+		XOR)	RESULT=$(( (A ^ B) & mask )) ;;
+		NAND)	RESULT=$(( (~(A & B)) & mask )) ;;
+		NOR)	RESULT=$(( (~(A | B)) & mask )) ;;
+		LSHIFT)	
+			[[ $B -ge $WIDTH ]] && error_exit "Shift amount ($B) exceeds bit-width ($WIDTH)."
+			RESULT=$(( (A << B) & mask )) 
+			;;
+		RSHIFT)	[[ $B -ge $WIDTH ]] && error_exit "Shift amount ($B) exceeds bit-width ($WIDTH)."
+			RESULT=$(( (A >> B) & mask )) 
+			;;
+		ROL) 	RESULT=$(rol "$A" "$B") ;;
+		ROR)	RESULT=$(ror "$A" "$B") ;;
+		ADD)	RESULT=$(( (A + B) & mask )) ;;
+		SUB) 	RESULT=$(( (A - B) & mask )) ;;
+		MUL) 	RESULT=$(( (A * B) & mask )) ;;
+		DIV)
+			[[ $B -eq 0 ]] && error_exit "Division By Zero."
+			RESULT=$(( (A / B) & mask ))
+			;;
+		*)	error_exit "Unsupported operator '$op'" ;;
+	esac
+
+
+	if [[ $QUIET -eq 0 ]]; then
+		A_BIN=$(dec_to_bin "$A" "$WIDTH")
+		B_BIN=$(dec_to_bin "$B" "$WIDTH")
+		R_BIN=$(dec_to_bin "$RESULT" "$WIDTH")
+
+		echo -e "${CYAN}$A_RAW${RESET} ->	${A_BIN} ($A)"
+		echo -e "${CYAN}$B_RAW${RESET} -> 	${B_BIN} ($B)"
+		echo -e "${BOLD}............................................${RESET}"
+		echo -e "${BOLD}$A_RAW $OP $B_RAW${RESET} -> ${GREEN}${R_BIN}${RESET}"
+		echo -e "${GREEN}${R_BIN}${RESET} -> ${BOLD}$(quiet_output "$RESULT")${RESET}"
+	else
+		q_output "$RESULT"
+	fi
+}
+
+ARGS=()
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+		-f|--from)	FROM_BASE="$2"; shift 2 ;;
+		-t|--to)	TO_BASE="$2"; shift 2 ;;
+		-p|--pad)	PAD="$2"; shift 2 ;;
+		-w|--width)	WIDTH="$2" shift 2 ;;
+		--prec)		PRECISION="$2" shift 2 ;;
+		-v|--verbose)	VERBOSE=1; shift ;;
+		-q|--quiet)	QUIET=1; shift ;;
+		-h|--help)	usage ;;
+		*)	ARGS+=("$1"); shift ;;
+	esac
+done
+
+if [[ ! -t 0 ]]; then
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		for word in $line; do
+			ARGS+=("$word")
+		done
+	done
+fi
+
+[[ ${#ARGS[@]} -eq 0 ]] && usage
+
+if [[ $QUIET -eq 1 ]]; then
+	BOLD="" GREEN="" CYAN="" YELLOW="" RED="" RESET="" 
+fi
+
+if [[ "${ARGS[0]}" =~ $rational_re && "$TO_BASE" == "bin" ]]; then
+	int_frac_sep "${ARGS[0]}"
+	exit 0
+fi
+
+case ${#ARGS[@]} in
+	1)
+		if [[ "${ARGS[0]}" =~ ^-[0-9]+$ ]]; then
+			eval_unary "2COMP" "${ARGS[0]}"
+		else
+			NUM=$(parse_to_dec "${ARGS[0]}")
+			quiet_output "$NUM"
+		fi
+		;;
+	2) 
+		eval_unary "${ARGS[0]}" "${ARGS[1]}"
+		;;
+	3)
+		eval_binary "${ARGS[0]}" "${ARGS[1]}" "${ARGS[2]}"
+		;;
+	*)
+		error_exit "Invalid argument layout. Run bitcalc --help'."
+		;;
+esac
