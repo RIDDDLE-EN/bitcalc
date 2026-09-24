@@ -175,7 +175,7 @@ carry() {
 		carry=$(( (ba & bb) | (carry & (ba ^ bb)) ))
 	done
 	[[ $carry -eq 1 ]] && carry_str="1${carry_str}" || carry_str=" ${carry_str}"
-	echo $carry_str
+	echo "$carry_str"
 }
 
 to_bcd() {
@@ -279,10 +279,13 @@ print_unary_verbose() {
 		local abs_bin comp1_bin	res_bin
 		abs_bin=$(dec_to_bin "$abs_num" "$WIDTH")
 		comp1_bin=$(dec_to_bin "$(( (~abs_num) & mask ))" "$WIDTH")
+		comp1_dec=$(parse_to_dec "0b$comp1_bin")
 		res_bin=$(dec_to_bin "$res" "$WIDTH")
+		carry_str=$(carry "$comp1_dec" 1)
 
 		echo -e "${CYAN}${num_raw}${RESET}"
 		echo -e "${CYAN}${abs_num}${RESET}		-> ${abs_bin}"
+		echo -e "carry:		  ${CYAN}${carry_str}${RESET}"
 		echo -e "1comp		-> ${CYAN}${comp1_bin}${RESET}"
 		echo -e "		 + $(printf "%${WIDTH}s" "1")"
 		echo -e "..................................."
