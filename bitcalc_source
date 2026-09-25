@@ -186,11 +186,38 @@ carry() {
 	echo "$res"
 }
 
-true_res() {
-	local res="$1" mask="$2"
-	res=$(( res < 0 ? ((res - mask) -1) : res ))
+x_shift() {
+	local a="$1" b="$2" v_shift="$3"
+	local n_b=$((b < 0 ? -b : b))
+	[[ $n_b -ge $WIDTH ]] && error_exit "Shift exceeds width."
+	local mask=$(( (1 << WIDTH) - 1 ))
+	local lshift=$(( a << n_b ))
+	local rshift=$(( a >> n_b ))
+	case "$v_shift" in 
+		LSHIFT)	res=$((b < 0 ? rshift : lshift )) ;;
+		RSHIFT)	res=$((b < 0 ? lshift : rshift )) ;;
+	esac
+	res=$(( res & mask ))
 	echo "$res"
 }
+
+x_ro() {
+	local a="$1" b="$2" v_rol="$3"
+	local n_b=$((b < 0 ? -b : b))
+	local mask=$(( (1 << WIDTH) - 1 ))
+	n_b=$(( n_b % WIDTH ))
+
+	local rol=$(( ((a << n_b ) | (a >> (WIDTH - n_b))) & mask ))
+	local ror=$(( ((a >> n_b ) | (a << (WIDTH - n_b))) & mask ))
+
+	case "$v_rol" in
+		ROR)	res=$((b < 0 ? rol : ror )) ;;
+		ROL)	res=$((b < 0 ? ror : rol )) ;;
+	esac
+	
+	echo "$res"
+}
+
 
 to_bcd() {
 	local dec_str="$1"
@@ -226,22 +253,6 @@ bswap() {
 	esac
 }
 
-rol() {
-	local val=$1
-	local shift=$2
-	local mask=$(( (1 << WIDTH) -1 ))
-	shift=$(( shift % WIDTH ))
-	echo "$(( ((val << shift) | (val >> (WIDTH - shift))) & mask ))"
-}
-
-ror() {
-	local val=$1
-	local shift=$2
-	local mask=$(( (1 << WIDTH) -1 ))
-	shift=$(( shift % WIDTH ))
-	echo "$(( ((val >> shift) | (val << (WIDTH - shift))) & mask ))"
-}
-
 format_output() {
 	local result="$1"
 	local dec_val=$result
@@ -263,23 +274,24 @@ q_output() {
 
 print_binary_add() {
 	local a=$1 b=$2 res=$3 mask=$4 op=$5 symbol=$6
-	local a_bin b_bn res_bin carry_str=" "
+	local a_bin b_bn n_res res_bin carry_str=" "
 
 	a_bin=$(dec_to_bin "$(2comp "$a")" "$WIDTH")
 	b_bin=$(dec_to_bin "$(2comp "$b")" "$WIDTH")
-	res_bin=$(dec_to_bin "$res" "$WIDTH")
+	n_res=$(( res & mask ))
+	res_bin=$(dec_to_bin "$n_res" "$WIDTH")
 
 	if [[ "$op" == "ADD" ]]; then
 		carry_str=$(carry "$a" "$b")
-		echo -e "carry:	 ${CYAN}${carry_str}${RESET}"
+		echo -e "carry:	 	 ${CYAN}${carry_str}${RESET}"
 	fi
 
-	echo -e "$a	= ${CYAN}${a_bin}${RESET}"
-	echo -e "$b	= ${CYAN}${b_bin}${RESET}"
-	echo -e "	${BOLD}${symbol}${RESET}"
+	echo -e "$a		= ${CYAN}${a_bin}${RESET}"
+	echo -e "$b		= ${CYAN}${b_bin}${RESET}"
+	echo -e "		${BOLD}${symbol}${RESET}"
 	echo -e "..................................."
-	echo -e "$a$op$b	= ${GREEN}${res_bin}${RESET}"
-	echo -e "ans_dec= ${GREEN}$(true_res "$res" "$mask")${RESET}"
+	echo -e "$a$op$b	= ${GREEN}${res_bin}($n_res)${RESET}"
+	echo -e "ans_dec= ${GREEN}$res${RESET}"
 }
 
 print_unary_verbose() {
@@ -336,7 +348,7 @@ evaluate_math() {
 		case "$op" in
 			NOT)	res=$(( (~num) & mask )) ;;
 			1COMP)	res=$(( (~num) & mask )) ;;
-			2COMP)	res=$(2comp "$num") ;;
+			2COMP)	res=$(2comp "$res") ;;
 			POPCNT)	res=$(popcount "$num") ;;
 			BSWAP)	res=$(bswap "$num") ;;
 			*)	error_exit "Unknown unary operator '$op'" ;;
@@ -359,10 +371,10 @@ evaluate_math() {
 			XOR)	res=$(( a ^ b )); symbol="^" ;;
 			NAND)	res=$(( ~(a & b) )); symbol="~&" ;;
 			NOR)	res=$(( ~(a | b) )); symbol="~|" ;;
-			LSHIFT)	[[ $b -ge $WIDTH ]] && error_exit "Shift exceeds width."; res=$(( a << b )); symbol="<<" ;;
-			RSHIFT)	[[ $b -ge $WIDTH ]] && error_exit "Shift exceeds width."; res=$(( a >> b )); symbol=">>" ;;
-			ROL)	res=$(rol "$a" "$b"); symbol="<|" ;;
-			ROR)	res=$(ror "$a" "$b"); symbol="|>" ;;
+			LSHIFT)	res=$(x_shift "$a" "$b" "LSHIFT") symbol="<<" ;;
+			RSHIFT)	res=$(x_shift "$a" "$b" "RSHIFT") symbol=">>" ;;
+			ROL)	res=$(x_ro "$a" "$b" "ROL"); symbol="<|" ;;
+			ROR)	res=$(x_ro "$a" "$b" "ROR"); symbol="|>" ;;
 			*)	error_exit "Unsupported operator '$op'" ;;
 		esac
 
@@ -384,7 +396,7 @@ evaluate_math() {
 		fi
 	fi
 
-	format_output "$(true_res "$res" "$mask")"
+	format_output "$res"
 }
 
 process_input() {
