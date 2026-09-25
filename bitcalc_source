@@ -68,7 +68,6 @@ EXAMPLES:
 	bitcalc 0b10110110 POPCNT
 	bitcalc -v 0b1011 ADD 0b0110bitcalc 10 LSHIFT 2 | bitcalc -t hex
 EOF
-	exit 0
 }
 
 validate_input() {
@@ -413,7 +412,7 @@ process_input() {
 			--prec)			PRECISION="$2"; shift 2 ;;
 			-q|--quiet)		QUIET=1; VERBOSE=0; shift ;;
 			-i|--interactive)	INTERACTIVE=1; shift ;;
-			-h|--help)		usage ;;
+			-h|--help)		usage; exit 0 ;;
 			*)			args+=("$1"); shift ;;
 		esac
 	done
@@ -424,11 +423,11 @@ process_input() {
 				for word in $line; do args+=("$word"); done
 			done
 		else
-			usage
+			usage; exit 0
 		fi
 	fi
 
-	[[ ${#args[@]} -eq 0 && $INTERACTIVE -eq 0 ]] && usage
+	[[ ${#args[@]} -eq 0 && $INTERACTIVE -eq 0 ]] && usage; exit 0
 	
 	if [[ $QUIET -eq 1 ]]; then
 		BOLD="" GREEN="" CYAN="" YELLOW="" RED="" RESET=""
@@ -445,7 +444,7 @@ process_input() {
 }
 
 start_repl() {
-	echo -e "${BOLD}bitcalc REPL${RESET} (Type 'exit' to quit)"
+	echo -e "${BOLD}bitcalc REPL${RESET} (Type 'exit' or ':q' to quit, 'clear' to clear and 'help' for man page)"
 	while true; do
 		echo -ne "${CYAN}bitcalc> ${RESET}"
 		if ! read -r line || [[ "$line" == "exit" || "$line" == ":q" ]]; then
@@ -453,6 +452,9 @@ start_repl() {
 			break
 		elif [[ "$line" == "clear" ]]; then
 			clear
+			continue
+		elif [[ "$line" == "help" ]]; then
+			usage
 			continue
 		fi
 		[[ -z "$line" ]] && continue
