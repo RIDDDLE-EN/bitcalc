@@ -178,6 +178,14 @@ carry() {
 	echo "$carry_str"
 }
 
+2comp() {
+	local num="$1"
+	local abs_num=$(( num < 0 ? -num : num ))
+	res_for_neg=$(( ((~abs_num) + 1) & mask ))
+	res=$(( num < 0 ? res_for_neg : num ))
+	echo "$res"
+}
+
 to_bcd() {
 	local dec_str="$1"
 	local bcd_out=""
@@ -251,8 +259,8 @@ print_binary_add() {
 	local a=$1 b=$2 res=$3 mask=$4 op=$5 symbol=$6
 	local a_bin b_bn res_bin carry_str=" "
 
-	a_bin=$(dec_to_bin "$a" "$WIDTH")
-	b_bin=$(dec_to_bin "$b" "$WIDTH")
+	a_bin=$(dec_to_bin "$(2comp "$a")" "$WIDTH")
+	b_bin=$(dec_to_bin "$(2comp "$b")" "$WIDTH")
 	res_bin=$(dec_to_bin "$res" "$WIDTH")
 
 	if [[ "$op" == "ADD" ]]; then
@@ -324,11 +332,7 @@ evaluate_math() {
 		case "$op" in
 			NOT)	res=$(( (~num) & mask )) ;;
 			1COMP)	res=$(( (~num) & mask )) ;;
-			2COMP)
-				local abs_num=$(( num < 0 ? -num : num ))
-				res_for_neg=$(( ((~abs_num) + 1) & mask ))
-				res=$(( num < 0 ? res_for_neg : num ))
-				;;
+			2COMP)	res=$(2comp "$num") ;;
 			POPCNT)	res=$(popcount "$num") ;;
 			BSWAP)	res=$(bswap "$num") ;;
 			*)	error_exit "Unknown unary operator '$op'" ;;
@@ -360,7 +364,7 @@ evaluate_math() {
 
 		if [[ $QUIET -eq 0 && $VERBOSE -eq 1 ]]; then
 			if [[ "$op" == "RSHIFT" || "$op" == "LSHIFT" || "$op" == "ROR" || "$op" == "ROL" ]]; then
-				local a_bin=$(dec_to_bin "$a" "$WIDTH")
+				local a_bin=$(dec_to_bin "$(2comp "$a")" "$WIDTH")
 				local res_bin=$(dec_to_bin "$res" "$WIDTH")
 				echo -e "num	= ${CYAN}${a_bin}${RESET} (${a})"
 				echo -e "	${BOLD}${symbol} ${b}${RESET}"
