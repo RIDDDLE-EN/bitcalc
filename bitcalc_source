@@ -321,7 +321,11 @@ print_unary_verbose() {
 
 		echo -e "${CYAN}${num_raw}${RESET}	-> ${num_bin}"
 		echo -e ".............................."
-		echo -e "${BOLD}${op}${RESET}	-> ${GREEN}${res_bin}${RESET}($res)"
+		if [[ "$op" == "POPCNT" ]]; then
+			echo -e "${BOLD}${op}${RESET}	-> number of 1s=${GREEN}${res}${RESET}"
+		else
+			echo -e "${BOLD}${op}${RESET}	-> ${GREEN}${res_bin}${RESET}($res)"
+		fi
 	fi
 }
 
