@@ -186,6 +186,12 @@ carry() {
 	echo "$res"
 }
 
+true_res() {
+	local res="$1" mask="$2"
+	res=$(( res < 0 ? ((res - mask) -1) : res ))
+	echo "$res"
+}
+
 to_bcd() {
 	local dec_str="$1"
 	local bcd_out=""
@@ -265,17 +271,15 @@ print_binary_add() {
 
 	if [[ "$op" == "ADD" ]]; then
 		carry_str=$(carry "$a" "$b")
-	else
-		carry_str=$(printf "%${WIDTH}s" " ")
+		echo -e "carry:	 ${CYAN}${carry_str}${RESET}"
 	fi
 
-	echo -e "carry:	 ${CYAN}${carry_str}${RESET}"
 	echo -e "$a	= ${CYAN}${a_bin}${RESET}"
 	echo -e "$b	= ${CYAN}${b_bin}${RESET}"
 	echo -e "	${BOLD}${symbol}${RESET}"
 	echo -e "..................................."
 	echo -e "$a$op$b	= ${GREEN}${res_bin}${RESET}"
-	echo -e "ans_dec= ${GREEN}${res}${RESET}"
+	echo -e "ans_dec= ${GREEN}$(true_res "$res" "$mask")${RESET}"
 }
 
 print_unary_verbose() {
@@ -346,17 +350,17 @@ evaluate_math() {
 		local symbol="?"
 
 		case "$op" in
-			ADD)	res=$(( (a + b) & mask )); symbol="+" ;;
-			SUB)	res=$(( (a - b) & mask )); symbol="-" ;;
-			MUL)	res=$(( (a * b) & mask )); symbol="*" ;;
-			DIV)	[[ $b -eq 0 ]] && error_exit "Division By Zero."; res=$(( (a / b) & mask )); symbol="/" ;;
-			AND)	res=$(( (a & b) & mask )); symbol="&" ;;
-			OR)	res=$(( (a | b) & mask )); symbol="|" ;;
-			XOR)	res=$(( (a ^ b) & mask )); symbol="^" ;;
-			NAND)	res=$(( (~(a & b)) & mask )); symbol="~&" ;;
-			NOR)	res=$(( (~(a | b)) & mask )); symbol="~|" ;;
-			LSHIFT)	[[ $b -ge $WIDTH ]] && error_exit "Shift exceeds width."; res=$(( (a << b) & mask )); symbol="<<" ;;
-			RSHIFT)	[[ $b -ge $WIDTH ]] && error_exit "Shift exceeds width."; res=$(( (a >> b) & mask )); symbol=">>" ;;
+			ADD)	res=$(( a + b )); symbol="+" ;;
+			SUB)	res=$(( a - b )); symbol="-" ;;
+			MUL)	res=$(( a * b )); symbol="*" ;;
+			DIV)	[[ $b -eq 0 ]] && error_exit "Division By Zero."; res=$(( a / b )); symbol="/" ;;
+			AND)	res=$(( a & b )); symbol="&" ;;
+			OR)	res=$(( a | b )); symbol="|" ;;
+			XOR)	res=$(( a ^ b )); symbol="^" ;;
+			NAND)	res=$(( ~(a & b) )); symbol="~&" ;;
+			NOR)	res=$(( ~(a | b) )); symbol="~|" ;;
+			LSHIFT)	[[ $b -ge $WIDTH ]] && error_exit "Shift exceeds width."; res=$(( a << b )); symbol="<<" ;;
+			RSHIFT)	[[ $b -ge $WIDTH ]] && error_exit "Shift exceeds width."; res=$(( a >> b )); symbol=">>" ;;
 			ROL)	res=$(rol "$a" "$b"); symbol="<|" ;;
 			ROR)	res=$(ror "$a" "$b"); symbol="|>" ;;
 			*)	error_exit "Unsupported operator '$op'" ;;
@@ -365,7 +369,8 @@ evaluate_math() {
 		if [[ $QUIET -eq 0 && $VERBOSE -eq 1 ]]; then
 			if [[ "$op" == "RSHIFT" || "$op" == "LSHIFT" || "$op" == "ROR" || "$op" == "ROL" ]]; then
 				local a_bin=$(dec_to_bin "$(2comp "$a")" "$WIDTH")
-				local res_bin=$(dec_to_bin "$res" "$WIDTH")
+				local n_res=$(( res & mask ))
+				local res_bin=$(dec_to_bin "$n_res" "$WIDTH")
 				echo -e "num	= ${CYAN}${a_bin}${RESET} (${a})"
 				echo -e "	${BOLD}${symbol} ${b}${RESET}"
 				echo -e ".................................."
@@ -374,10 +379,12 @@ evaluate_math() {
 			else
 				print_binary_add "$a" "$b" "$res" "$mask" "$op" "$symbol"
 			fi
+
+			exit 0
 		fi
 	fi
 
-	format_output "$res"
+	format_output "$(true_res "$res" "$mask")"
 }
 
 process_input() {
