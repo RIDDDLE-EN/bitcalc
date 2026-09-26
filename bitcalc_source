@@ -261,7 +261,7 @@ print_unary_verbose() {
 	local mask=$(( (1 << WIDTH) - 1 ))
 
 	if [[ $num =~ $neg_re && "$op" == "2COMP" ]]; then
-		local abs_num=$(( num < 0 ? -num : num ))
+		local abs_num=$(( -num ))
 		local comp1_dec=$(( (~abs_num) & mask ))
 
 		echo -e "${CYAN}${num_raw}${RESET}"
@@ -272,7 +272,7 @@ print_unary_verbose() {
 		echo -e "..................................."
 		echo -e "twos-comp ${num_raw}	-> ${GREEN}$(dec_to_bin "$res" "$WIDTH")${RESET}"
 	else
-		echo -e "${CYAN}${num_raw}${RESET}	-> $(dec_to_bin "$(twos_comp "$num") "$WIDTH")"
+		echo -e "${CYAN}${num_raw}${RESET}	-> $(dec_to_bin "$(twos_comp "$num")" "$WIDTH")"
 		echo -e ".............................."
 		if [[ "$op" == "POPCNT" ]]; then
 			echo -e "${BOLD}${op}${RESET}	-> number of 1s=${GREEN}${res}${RESET}"
@@ -396,9 +396,10 @@ process_input() {
 
 start_repl() {
 	echo -e "${BOLD}bitcalc REPL${RESET} (Type 'exit' or ':q' to quit, 'clear' to clear and 'help' for man page)"
+	set -o history
+	local PROMP=$'\001\033[36m\002bitcalc> \001\033[0m\002'
 	while true; do
-		echo -ne "${CYAN}bitcalc> ${RESET}"
-		if ! read -r line || [[ "$line" == "exit" || "$line" == ":q" ]]; then
+		if ! read -e -p "$PROMP" line || [[ "$line" == "exit" || "$line" == ":q" ]]; then
 			echo ""
 			break
 		elif [[ "$line" == "clear" ]]; then
@@ -410,8 +411,12 @@ start_repl() {
 		fi
 		[[ -z "$line" ]] && continue
 
+		history -s "$line"
+
 		( process_input $line ) || true
 	done
+
+	set +0 history
 }
 
 if [[ "$*" == *"-i"* || "$*" == *"--interactive"* ]]; then
