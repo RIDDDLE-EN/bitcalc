@@ -417,7 +417,7 @@ start_repl() {
 		( process_input $line ) || true
 	done
 
-	set +0 history
+	set +o history
 }
 
 if [[ "$*" == *"-i"* || "$*" == *"--interactive"* ]]; then
