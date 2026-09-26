@@ -435,11 +435,10 @@ process_input() {
 	fi
 
 	if [[ ${#args[@]} -gt 0 && "${args[0]}" =~ $rational_re ]]; then
-		[[ "${args[0]}" =~ neg_re ]] && error_exit "cannot perform fractional operation with negatives"
 		int_frac_sep "${args[0]}"
 		exit 0
 	else
-		[[ "${args[0]}" =~ neg_rational_re ]] && error_exit "cannot perform fractional operation with negatives"
+		[[ "${args[0]}" =~ $neg_rational_re ]] && error_exit "cannot perform fractional operation with negatives"
 	fi
 
 	if [[ ${#args[@]} -gt 0 ]]; then
