@@ -63,7 +63,7 @@ EXAMPLES:
 	bitcalc 10 AND 12
 	bitcalc -v 0b1010 XOR 0b1100
 	bitcalc NOT 0b10101011 --pad 8
-	bitcalc -w 8 --to twos-comp -10
+	bitcalc -w 8 --to twos_comp -10
 	bitcalc -w 8 0b010000001 ROL 1
 	bitcalc -w 16 0xABCD BSWAP
 	bitcalc 0b10110110 POPCNT
@@ -245,15 +245,15 @@ print_binary_add() {
 	n_res=$(( res & mask ))
 
 	if [[ "$op" == "ADD" ]]; then
-		echo -e "carry:	 	 ${CYAN}$(carry "$a" "$b")${RESET}"
+		printf "%-14s %b\n" "carry" "${CYAN}$(carry "$a" "$b")${RESET}"
 	fi
 
-	echo -e "$a		= ${CYAN}$(dec_to_bin "$(twos_comp "$a")" "$WIDTH")${RESET}"
-	echo -e "$b		= ${CYAN}$(dec_to_bin "$(twos_comp "$b")" "$WIDTH")${RESET}"
-	echo -e "		${BOLD}${symbol}${RESET}"
+	printf "%-14s= %b\n" "$a" "${CYAN}$(dec_to_bin "$(twos_comp "$a")" "$WIDTH")${RESET}"
+	printf "%-14s= %b\n" "$b" "${CYAN}$(dec_to_bin "$(twos_comp "$b")" "$WIDTH")${RESET}"
+	printf "%-14s= %b\n" "" "${BOLD}${symbol}${RESET}"
 	echo -e "..................................."
-	echo -e "$a$op$b	= ${GREEN}$(dec_to_bin "$(twos_comp "$n_res")" "$WIDTH")($n_res)${RESET}"
-	echo -e "ans_dec= ${GREEN}$res${RESET}"
+	printf "%-14s= %b\n" "${a}${op}${b}" "${GREEN}$(dec_to_bin "$n_res" "$WIDTH")($n_res)${RESET}"
+	printf "%-14s= %b\n" "ans_dec" "${GREEN}$res${RESET}"
 }
 
 print_unary_verbose() {
@@ -265,19 +265,20 @@ print_unary_verbose() {
 		local comp1_dec=$(( (~abs_num) & mask ))
 
 		echo -e "${CYAN}${num_raw}${RESET}"
-		echo -e "${CYAN}${abs_num}${RESET}		-> $(dec_to_bin "$abs_num" "$WIDTH")"
-		echo -e "carry:		  ${CYAN}$(carry "$comp1_dec" 1)${RESET}"
-		echo -e "1comp		-> ${CYAN}$(dec_to_bin "$comp1_dec" "$WIDTH")${RESET}"
-		echo -e "		 + $(printf "%${WIDTH}s" "1")"
+		printf "${CYAN}%-14s${RESET}-> %b\n" "${abs_num}" "$(dec_to_bin "$abs_num" "$WIDTH")"
 		echo -e "..................................."
-		echo -e "twos-comp ${num_raw}	-> ${GREEN}$(dec_to_bin "$res" "$WIDTH")${RESET}"
+		printf "%-14s %b\n" "carry:" "${CYAN}$(carry "$comp1_dec" 1)${RESET}"
+		printf "%-14s-> %b\n" "1comp" "${CYAN}$(dec_to_bin "$comp1_dec" "$WIDTH")${RESET}"
+		printf "%-14s %b\n" "" "+ $(printf "%${WIDTH}s" "1")"
+		echo -e "..................................."
+		printf "%-14s %b\n" "2comp" "${num_raw}	-> ${GREEN}$(dec_to_bin "$res" "$WIDTH")${RESET}"
 	else
-		echo -e "${CYAN}${num_raw}${RESET}	-> $(dec_to_bin "$(twos_comp "$num")" "$WIDTH")"
+		printf "${CYAN}%-14s${RESET} %b\n" "${num_raw}" "$(dec_to_bin "$(twos_comp "$num")" "$WIDTH")"
 		echo -e ".............................."
 		if [[ "$op" == "POPCNT" ]]; then
-			echo -e "${BOLD}${op}${RESET}	-> number of 1s=${GREEN}${res}${RESET}"
+			printf "${BOLD}%-14s${RESET}-> %b\n" "${op}" "number of 1s=${GREEN}${res}${RESET}"
 		else
-			echo -e "${BOLD}${op}${RESET}	-> ${GREEN}$(dec_to_bin "$res" "$WIDTH")${RESET}($res)"
+			printf "${BOLD}%-14s${RESET}-> %b\n" "${op}" "${GREEN}$(dec_to_bin "$res" "$WIDTH")${RESET}($res)"
 		fi
 	fi
 }
@@ -291,7 +292,7 @@ evaluate_math() {
 	if [[ $len -eq 1 ]]; then
 		local num_raw="${args[0]}"
 		if [[ "$num_raw" =~ $neg_re ]]; then
-			res=$(twos-comp "$num_raw")
+			res=$(twos_comp "$num_raw")
 			[[ $QUIET -eq 0 && $VERBOSE -eq 1 ]] && print_unary_verbose "$num_raw" "2COMP" "$num_raw" "$res"
 		else
 			res=$(parse_to_dec "$num_raw")
@@ -303,8 +304,8 @@ evaluate_math() {
 		case "$op" in
 			NOT)	res=$(( (~num) & mask )) ;;
 			1COMP)	res=$(( (~num) & mask )) ;;
-			2COMP)	res=$(twos-comp "$num") ;;
-			POPCNT)	res=$(popcount "$(twos-comp "$num")") ;;
+			2COMP)	res=$(twos_comp "$num") ;;
+			POPCNT)	res=$(popcount "$(twos_comp "$num")") ;;
 			BSWAP)	res=$(bswap "$num") ;;
 			*)	error_exit "Unknown unary operator '$op'" ;;
 		esac
@@ -334,11 +335,11 @@ evaluate_math() {
 		if [[ $QUIET -eq 0 && $VERBOSE -eq 1 ]]; then
 			if [[ "$op" == "RSHIFT" || "$op" == "LSHIFT" || "$op" == "ROR" || "$op" == "ROL" ]]; then
 				local n_res=$(( res & mask ))
-				echo -e "num	= ${CYAN}$(dec_to_bin "$(twos_comp "$a")" "$WIDTH")${RESET} (${a})"
-				echo -e "	${BOLD}${symbol} ${b}${RESET}"
+				printf "%-14s= %b\n" "num" "${CYAN}$(dec_to_bin "$(twos_comp "$a")" "$WIDTH")${RESET} (${a})"
+				printf "%-14s %b\n" "" "${BOLD}${symbol} ${b}${RESET}"
 				echo -e ".................................."
-				echo -e "ans	= ${GREEN}$(dec_to_bin "$n_res" "$WIDTH")${RESET}"
-				echo -e "ans_dec= ${GREEN}${res}${RESET}"
+				printf "%-14s= %b\n" "ans" "${GREEN}$(dec_to_bin "$n_res" "$WIDTH")${RESET}"
+				printf "%-14s= %b\n" "ans_dec:" "${GREEN}${res}${RESET}"
 			else
 				print_binary_add "$a" "$b" "$res" "$mask" "$op" "$symbol"
 			fi
@@ -411,7 +412,7 @@ start_repl() {
 		fi
 		[[ -z "$line" ]] && continue
 
-		history -s "$line"
+		history -s -- "$line"
 
 		( process_input $line ) || true
 	done
