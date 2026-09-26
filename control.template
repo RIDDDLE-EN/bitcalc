@@ -1,5 +1,5 @@
 Package: bitcalc
-Versio: {{VERSION}}
+Version: {{VERSION}}
 Architecture: all
 Maintainer: Nyang'ada Stone Bradley stonbradley@gmail.com
 Priority: optional
