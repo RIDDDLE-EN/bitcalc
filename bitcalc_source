@@ -17,8 +17,9 @@ YELLOW="\033[33m"
 RED="\033[31m"
 RESET="\033[0m"
 
-rational_re="^-?[0-9]+\.[0-9]+$"
+rational_re="^[0-9]+\.[0-9]+$"
 neg_re="^-[0-9]+$"
+neg_rational_re="^-?[0-9]+\.[0-9]+$"
 
 error_exit() {
 	echo -e "${RED}Error:${RESET} $1" >&2
@@ -159,7 +160,7 @@ int_frac_sep() {
 	int_part="${dec%.*}"
 	frac_part="${dec#*.}"
 
-	bin_int=$(dec_to_bin "$int_part" "$PAD")
+	bin_int=$(dec_to_bin "$int_part" "$WIDTH")
 	bin_frac=$(dec_to_bin_frac "$frac_part" "$PRECISION")
 	echo "${bin_int}.${bin_frac}"
 }
@@ -427,15 +428,18 @@ process_input() {
 		fi
 	fi
 
-	[[ ${#args[@]} -eq 0 && $INTERACTIVE -eq 0 ]] && usage; exit 0
+	[[ ${#args[@]} -eq 0 && $INTERACTIVE -eq 0 ]] && usage
 	
 	if [[ $QUIET -eq 1 ]]; then
 		BOLD="" GREEN="" CYAN="" YELLOW="" RED="" RESET=""
 	fi
 
-	if [[ ${#args[@]} -gt 0 && "${args[0]}" =~ $rational_re && "${TO_BASE,,}" == "bin" ]]; then
+	if [[ ${#args[@]} -gt 0 && "${args[0]}" =~ $rational_re ]]; then
+		[[ "${args[0]}" =~ neg_re ]] && error_exit "cannot perform fractional operation with negatives"
 		int_frac_sep "${args[0]}"
-		return 0
+		exit 0
+	else
+		[[ "${args[0]}" =~ neg_rational_re ]] && error_exit "cannot perform fractional operation with negatives"
 	fi
 
 	if [[ ${#args[@]} -gt 0 ]]; then
