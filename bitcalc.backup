@@ -19,7 +19,7 @@ RESET="\033[0m"
 
 rational_re="^[0-9]+\.[0-9]+$"
 neg_re="^-[0-9]+$"
-neg_rational_re="^-[0-9]+\.[0-9]+$"
+neg_rational_re="^-?[0-9]+\.[0-9]+$"
 
 error_exit() {
 	echo -e "${RED}Error:${RESET} $1" >&2
@@ -63,7 +63,7 @@ EXAMPLES:
 	bitcalc 10 AND 12
 	bitcalc -v 0b1010 XOR 0b1100
 	bitcalc NOT 0b10101011 --pad 8
-	bitcalc -w 8 --to twos-comp -10
+	bitcalc -w 8 --to 2comp -10
 	bitcalc -w 8 0b010000001 ROL 1
 	bitcalc -w 16 0xABCD BSWAP
 	bitcalc 0b10110110 POPCNT
@@ -72,7 +72,8 @@ EOF
 }
 
 validate_input() {
-	local val="$1" base="$2"
+	local val="$1"
+	local base="$2"
 
 	case "$base" in
 		bin|2)	[[ "$val" =~ ^[01]+(\.[01]+)?$ ]] || error_exit "'$val' contains invalid binary digits. Expected only 0 or 1." ;;
@@ -83,8 +84,9 @@ validate_input() {
 }
 
 parse_to_dec() {
-	local val="$1"
+	local raw="$1"
 	local base_hint="$FROM_BASE"
+	local val="$raw"
 
 	if [[ -z "$base_hint" ]]; then
 		if [[ "$val" =~ ^0[bB][01]+$ ]]; then
@@ -112,24 +114,33 @@ parse_to_dec() {
 }
 
 dec_to_bin() {
-	local val=$1 pad=$2 res=""
+	local n=$1
+	local pad=$2
+	local res=""
 
-	if [ "$val" -eq 0 ]; then
+	if [ "$n" -eq 0 ]; then
 		res="0"
 	else
+		local val=$n
 		while [ "$val" -gt 0 ]; do
 			res="$(( val & 1 ))$res"
 			val=$(( val >> 1 ))
 		done
 	fi
-	printf "%0${pad}d\n" "${res:-0}"
+
+	while [ "${#res}" -lt "$pad" ]; do
+		res="0$res"
+	done
+	echo "$res"
 }
 
 dec_to_bin_frac() {
-	local frac_str="$1" prec="$2"
+	local frac_str="$1"
+	local prec="$2"
 	local len="${#frac_str}"
 	local scale=$(( 10 ** len ))
-	local val=$(( 10#$frac_str )) res=""
+	local val=$(( 10#$frac_str ))
+	local res=""
 
 	for (( i=0; i<prec; i++ )); do
 		val=$(( val * 2 ))
@@ -145,7 +156,13 @@ dec_to_bin_frac() {
 }
 
 int_frac_sep() {
-	echo "$(dec_to_bin "${1%.*}" "$WIDTH").$(dec_to_bin_frac "${1#*.}" "$PRECISION")"
+	dec=$1
+	int_part="${dec%.*}"
+	frac_part="${dec#*.}"
+
+	bin_int=$(dec_to_bin "$int_part" "$WIDTH")
+	bin_frac=$(dec_to_bin_frac "$frac_part" "$PRECISION")
+	echo "${bin_int}.${bin_frac}"
 }
 
 carry() {
@@ -157,46 +174,54 @@ carry() {
 		[[ $carry -eq 1 ]] && carry_str="1${carry_str}" || carry_str=" ${carry_str}"
 		carry=$(( (ba & bb) | (carry & (ba ^ bb)) ))
 	done
-	[[ $carry -eq 1 ]] && echo "1${carry_str}" || echo "${carry_str}"
+	[[ $carry -eq 1 ]] && carry_str="1${carry_str}" || carry_str=" ${carry_str}"
+	echo "$carry_str"
 }
 
-twos_comp() {
+2comp() {
 	local num="$1"
-	local mask=$(( (1 << WIDTH) - 1 ))
-	echo $(( num < 0 ? (((~(-num)) + 1) & mask) : num ))
+	local abs_num=$(( num < 0 ? -num : num ))
+	res_for_neg=$(( ((~abs_num) + 1) & mask ))
+	res=$(( num < 0 ? res_for_neg : num ))
+	echo "$res"
 }
 
 x_shift() {
 	local a="$1" b="$2" v_shift="$3"
 	local n_b=$((b < 0 ? -b : b))
 	[[ $n_b -ge $WIDTH ]] && error_exit "Shift exceeds width."
-
 	local mask=$(( (1 << WIDTH) - 1 ))
-	if [[ "$v_shift" == "LSHIFT" ]]; then
-		echo $(( (b < 0 ? (a >> n_b) : (a << n_b)) & mask ))
-	else
-		echo $(( (b < 0 ? (a << n_b) : (a >> n_b)) & mask ))
-	fi
+	local lshift=$(( a << n_b ))
+	local rshift=$(( a >> n_b ))
+	case "$v_shift" in 
+		LSHIFT)	res=$((b < 0 ? rshift : lshift )) ;;
+		RSHIFT)	res=$((b < 0 ? lshift : rshift )) ;;
+	esac
+	res=$(( res & mask ))
+	echo "$res"
 }
 
 x_ro() {
 	local a="$1" b="$2" v_rol="$3"
-	local n_b=$(( (b < 0 ? -b : b) % WIDTH ))
+	local n_b=$((b < 0 ? -b : b))
 	local mask=$(( (1 << WIDTH) - 1 ))
+	n_b=$(( n_b % WIDTH ))
 
 	local rol=$(( ((a << n_b ) | (a >> (WIDTH - n_b))) & mask ))
 	local ror=$(( ((a >> n_b ) | (a << (WIDTH - n_b))) & mask ))
 
-	if [[ "$v_rol" == "ROL" ]]; then
-		echo $(( b < 0 ? ror : rol ))
-	else
-		echo $(( b < 0 ? rol : ror ))
-	fi
+	case "$v_rol" in
+		ROR)	res=$((b < 0 ? rol : ror )) ;;
+		ROL)	res=$((b < 0 ? ror : rol )) ;;
+	esac
+	
+	echo "$res"
 }
 
 
 to_bcd() {
-	local dec_str="$1" bcd_out=""
+	local dec_str="$1"
+	local bcd_out=""
 	for (( i=0; i<${#dec_str}; i++ )); do
 		local digit="${dec_str:$i:1}"
 		bcd_out="${bcd_out}$(dec_to_bin "$digit" 4) "
@@ -205,11 +230,12 @@ to_bcd() {
 }
 
 bin_to_gray() {
-	echo "$(( $1 ^ ($1 >> 1) ))"
+	echo "$(( 1 ^ (1 >> 1) ))"
 }
 
 popcount() {
-	local n=$1 count=0
+	local n=$1
+	local count=0
 	while [ "$n" -gt 0 ]; do
 		count=$(( count + (n & 1) ))
 		n=$(( n >> 1 ))
@@ -240,19 +266,31 @@ format_output() {
 	esac
 }
 
+q_output() {
+	local result="$1"
+	printf "%s " $result
+	exit 0
+}
+
 print_binary_add() {
 	local a=$1 b=$2 res=$3 mask=$4 op=$5 symbol=$6
+	local a_bin b_bn n_res res_bin carry_str=" "
+
+	a_bin=$(dec_to_bin "$(2comp "$a")" "$WIDTH")
+	b_bin=$(dec_to_bin "$(2comp "$b")" "$WIDTH")
 	n_res=$(( res & mask ))
+	res_bin=$(dec_to_bin "$n_res" "$WIDTH")
 
 	if [[ "$op" == "ADD" ]]; then
-		echo -e "carry:	 	 ${CYAN}$(carry "$a" "$b")${RESET}"
+		carry_str=$(carry "$a" "$b")
+		echo -e "carry:	 	 ${CYAN}${carry_str}${RESET}"
 	fi
 
-	echo -e "$a		= ${CYAN}$(dec_to_bin "$(twos_comp "$a")" "$WIDTH")${RESET}"
-	echo -e "$b		= ${CYAN}$(dec_to_bin "$(twos_comp "$b")" "$WIDTH")${RESET}"
+	echo -e "$a		= ${CYAN}${a_bin}${RESET}"
+	echo -e "$b		= ${CYAN}${b_bin}${RESET}"
 	echo -e "		${BOLD}${symbol}${RESET}"
 	echo -e "..................................."
-	echo -e "$a$op$b	= ${GREEN}$(dec_to_bin "$(twos_comp "$n_res")" "$WIDTH")($n_res)${RESET}"
+	echo -e "$a$op$b	= ${GREEN}${res_bin}($n_res)${RESET}"
 	echo -e "ans_dec= ${GREEN}$res${RESET}"
 }
 
@@ -262,22 +300,31 @@ print_unary_verbose() {
 
 	if [[ $num =~ $neg_re && "$op" == "2COMP" ]]; then
 		local abs_num=$(( num < 0 ? -num : num ))
-		local comp1_dec=$(( (~abs_num) & mask ))
+		local abs_bin comp1_bin	res_bin
+		abs_bin=$(dec_to_bin "$abs_num" "$WIDTH")
+		comp1_bin=$(dec_to_bin "$(( (~abs_num) & mask ))" "$WIDTH")
+		comp1_dec=$(parse_to_dec "0b$comp1_bin")
+		res_bin=$(dec_to_bin "$res" "$WIDTH")
+		carry_str=$(carry "$comp1_dec" 1)
 
 		echo -e "${CYAN}${num_raw}${RESET}"
-		echo -e "${CYAN}${abs_num}${RESET}		-> $(dec_to_bin "$abs_num" "$WIDTH")"
-		echo -e "carry:		  ${CYAN}$(carry "$comp1_dec" 1)${RESET}"
-		echo -e "1comp		-> ${CYAN}$(dec_to_bin "$comp1_dec" "$WIDTH")${RESET}"
+		echo -e "${CYAN}${abs_num}${RESET}		-> ${abs_bin}"
+		echo -e "carry:		  ${CYAN}${carry_str}${RESET}"
+		echo -e "1comp		-> ${CYAN}${comp1_bin}${RESET}"
 		echo -e "		 + $(printf "%${WIDTH}s" "1")"
 		echo -e "..................................."
-		echo -e "twos-comp ${num_raw}	-> ${GREEN}$(dec_to_bin "$res" "$WIDTH")${RESET}"
+		echo -e "2comp ${num_raw}	-> ${GREEN}${res_bin}${RESET}"
 	else
-		echo -e "${CYAN}${num_raw}${RESET}	-> $(dec_to_bin "$(twos_comp "$num") "$WIDTH")"
+		local num_bin res_bin
+		num_bin=$(dec_to_bin "$(2comp "$num")" "$WIDTH")
+		res_bin=$(dec_to_bin "$res" "$WIDTH")
+
+		echo -e "${CYAN}${num_raw}${RESET}	-> ${num_bin}"
 		echo -e ".............................."
 		if [[ "$op" == "POPCNT" ]]; then
 			echo -e "${BOLD}${op}${RESET}	-> number of 1s=${GREEN}${res}${RESET}"
 		else
-			echo -e "${BOLD}${op}${RESET}	-> ${GREEN}$(dec_to_bin "$res" "$WIDTH")${RESET}($res)"
+			echo -e "${BOLD}${op}${RESET}	-> ${GREEN}${res_bin}${RESET}($res)"
 		fi
 	fi
 }
@@ -291,20 +338,21 @@ evaluate_math() {
 	if [[ $len -eq 1 ]]; then
 		local num_raw="${args[0]}"
 		if [[ "$num_raw" =~ $neg_re ]]; then
-			res=$(twos-comp "$num_raw")
+			res=$(2comp "$num_raw")
 			[[ $QUIET -eq 0 && $VERBOSE -eq 1 ]] && print_unary_verbose "$num_raw" "2COMP" "$num_raw" "$res"
 		else
 			res=$(parse_to_dec "$num_raw")
 		fi
 	elif [[ $len -eq 2 ]]; then
-		local op="${args[0]^^}" num_raw="${args[1]}"
+		local op="${args[0]^^}"
+		local num_raw="${args[1]}"
 		local num=$(parse_to_dec "$num_raw")
 
 		case "$op" in
 			NOT)	res=$(( (~num) & mask )) ;;
 			1COMP)	res=$(( (~num) & mask )) ;;
-			2COMP)	res=$(twos-comp "$num") ;;
-			POPCNT)	res=$(popcount "$(twos-comp "$num")") ;;
+			2COMP)	res=$(2comp "$res") ;;
+			POPCNT)	res=$(popcount "$(2comp "$num")") ;;
 			BSWAP)	res=$(bswap "$num") ;;
 			*)	error_exit "Unknown unary operator '$op'" ;;
 		esac
@@ -312,7 +360,9 @@ evaluate_math() {
 
 	elif [[ $len -eq 3 ]]; then
 		local a_raw="${args[0]}" op="${args[1]^^}" b_raw="${args[2]}"
-		local a=$(parse_to_dec "$a_raw") b=$(parse_to_dec "$b_raw") symbol="?"
+		local a=$(parse_to_dec "$a_raw")
+		local b=$(parse_to_dec "$b_raw")
+		local symbol="?"
 
 		case "$op" in
 			ADD)	res=$(( a + b )); symbol="+" ;;
@@ -333,11 +383,13 @@ evaluate_math() {
 
 		if [[ $QUIET -eq 0 && $VERBOSE -eq 1 ]]; then
 			if [[ "$op" == "RSHIFT" || "$op" == "LSHIFT" || "$op" == "ROR" || "$op" == "ROL" ]]; then
+				local a_bin=$(dec_to_bin "$(2comp "$a")" "$WIDTH")
 				local n_res=$(( res & mask ))
-				echo -e "num	= ${CYAN}$(dec_to_bin "$(twos_comp "$a")" "$WIDTH")${RESET} (${a})"
+				local res_bin=$(dec_to_bin "$n_res" "$WIDTH")
+				echo -e "num	= ${CYAN}${a_bin}${RESET} (${a})"
 				echo -e "	${BOLD}${symbol} ${b}${RESET}"
 				echo -e ".................................."
-				echo -e "ans	= ${GREEN}$(dec_to_bin "$n_res" "$WIDTH")${RESET}"
+				echo -e "ans	= ${GREEN}${res_bin}${RESET}"
 				echo -e "ans_dec= ${GREEN}${res}${RESET}"
 			else
 				print_binary_add "$a" "$b" "$res" "$mask" "$op" "$symbol"
