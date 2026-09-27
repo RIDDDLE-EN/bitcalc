@@ -2,8 +2,8 @@
 set -e
 echo "Setting up bitcalc repository..."
 
-apt-get update -qq
-apt-get install -y -qq ca-certificates curl
+sudo pt-get update -qq
+sudo apt-get install -y -qq ca-certificates curl
 
 cat << 'REPO' | tee /etc/apt/sources.list.d/bitcalc.sources > /dev/null
 Types: deb
@@ -14,7 +14,7 @@ REPO
 
 echo "Installing bitcalc..."
 
-apt-get update -qq
-apt-get install -y bitcalc
+sudo apt-get update -qq
+sudo apt-get install -y bitcalc
 
 echo "Success! bitcalc is now installed. Type 'bitcalc --help' to get started."
