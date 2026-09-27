@@ -2,7 +2,7 @@
 set -e
 echo "Setting up bitcalc repository..."
 
-sudo pt-get update -qq
+sudo apt-get update -qq
 sudo apt-get install -y -qq ca-certificates curl
 
 cat << 'REPO' | tee /etc/apt/sources.list.d/bitcalc.sources > /dev/null
