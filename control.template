@@ -1,6 +1,6 @@
 Package: bitcalc
 Version: {{VERSION}}
 Architecture: all
-Maintainer: Nyang'ada Stone Bradley stonbradley@gmail.com
+Maintainer: Nyang'ada Stone Bradley ridddle5050@gmail.com
 Priority: optional
 Description: Hardware engineering toolkit for binary arithmetic and bitwise visualizations.

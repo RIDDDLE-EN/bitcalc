@@ -23,20 +23,25 @@ jogs:
           VERSION=${GITHUB_REF_NAME#v}
 
           mkdir -p build_dir/usr/bin
+          mkdir -p build_dir/usr/share/man/man1
           mkdir -p build_dir/DEBIAN
 
           sed "s/{{VERSION}}/$VERSION/g" control.template > build_dir/DEBIAN/control
           
           cp bitcalc build_dir/usr/bin
-          chmod +x build_dir/usr/bin/bitcalc
+          chmod 755 build_dir/usr/bin/bitcalc
 
-          dpkg-deb --build build_dir bitcalc_${VERSION}_all.deb
+          cp bitcalc.1 build_dir/usr/share/man/man1/
+          gzip -9 -f build_dir/usr/share/man/man1/bitcalc.1
+          chmod 644 build_dir/usr/share/man/man1/bitcalc.1.gz
+
+          dpkg-deb --root-owner-group --build build_dir bitcalc_${VERSION}_all.deb
 
       - name: Generate APT Repository Index
         run: |
           mkdir -p apt-repo/pool/main
           mv *.deb apt-repo/pool/main/
-          cd ap-repo
+          cd apt-repo
           dpkg-scanpackages pool/main /dev/null | gzip -9c > Packages.gz
 
       - name: Deploy APT Repo to GitHub Pages
