@@ -5,7 +5,7 @@ on:
     tags:
       - 'v*.*.*'
 
-jogs:
+jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     permissions:
