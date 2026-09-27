@@ -16,7 +16,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install APT Packaging Tools
-        run: sudo apt-get update && sudo apt-get install -y dpkg-dev gzip shc build-essential
+        run: gapt-get update && apt-get install -y dpkg-dev gzip shc build-essential
 
       - name: Build Debian Package
         run: |
@@ -46,7 +46,7 @@ jobs:
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           echo "Installing the built package locally for testing..."
-          sudo dpkg -i "bitcalc_${VERSION}_all.deb"
+          gdpkg -i "bitcalc_${VERSION}_all.deb"
 
           echo "Testing binary execution"
           bitcalc --help > /dev/null
@@ -78,10 +78,10 @@ jobs:
           #!/usr/bin/bash
           set -e
           echo "Setting up bitcalc repository..."
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ca-certificates curl
+          gapt-get update -qq
+          gapt-get install -y -qq ca-certificates curl
 
-          cat << 'REPO' | sudo tee /etc/apt/sources.list.d/bitcalc.sources > /dev/null
+          cat << 'REPO' | gtee /etc/apt/sources.list.d/bitcalc.sources > /dev/null
           Types: deb
           URIs: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
           Suites: ./
@@ -89,8 +89,8 @@ jobs:
           REPO
 
           echo "Installing bitcalc..."
-          sudo apt-get update -qq
-          sudo apt-get install -y bitcalc
+          gapt-get update -qq
+          gapt-get install -y bitcalc
 
           echo "Success! bitcalc is now installed. Type 'bitcalc --help' to get started."
           EOF
