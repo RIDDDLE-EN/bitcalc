@@ -1,0 +1,4 @@
+# .gitattributes
+* text=auto
+bitcalc eol=lf
+bitcalc_source eol=lf

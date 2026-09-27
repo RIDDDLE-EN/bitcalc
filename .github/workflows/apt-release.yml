@@ -31,18 +31,67 @@ jobs:
           cp bitcalc build_dir/usr/bin
           chmod 755 build_dir/usr/bin/bitcalc
 
-          cp bitcalc.1 build_dir/usr/share/man/man1/
-          gzip -9 -f build_dir/usr/share/man/man1/bitcalc.1
-          chmod 644 build_dir/usr/share/man/man1/bitcalc.1.gz
+          if [ -f "bitcalc.1" ]; then
+            cp bitcalc.1 build_dir/usr/share/man/man1/bitcalc.1
+            gzip -9 -f build_dir/usr/share/man/man1/bitcalc.1
+            chmod 644 build_dir/usr/share/man/man1/bitcalc.1.gz
+          fi
 
           dpkg-deb --root-owner-group --build build_dir bitcalc_${VERSION}_all.deb
 
-      - name: Generate APT Repository Index
+      - name: Test Installed Package
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "Installing the built package locally for testing..."
+          sudo dpkg -i "bitcalc_${VERSION}_all.deb"
+
+          echo "Testing binary execution"
+          bitcalc --help > /dev/null
+
+          echo "Testing mathematical output..."
+          OUTPUT=$(bitcalc -q 10 ADD 2)
+          if [ "$OUTPUT" != "12" ]; then
+            echo "Test failed: Expected 12, got $OUTPUT"
+            exit
+          fi
+
+          echo "Testing Base Conversion..."
+          OUTPUT=$(bitcalc -q -t bin 0xA)
+          if [ "$OUTPUT" != "0b00001010" ]; then
+            echo "Test Failed: Expected 0b00001010 got $OUTPUT"
+            exit 1
+          fi
+
+          echo "All structural and logic tests passed successfully!"
+
+      - name: Generate APT Repository Index & Easy-Install Script
         run: |
           mkdir -p apt-repo/pool/main
           mv *.deb apt-repo/pool/main/
           cd apt-repo
           dpkg-scanpackages pool/main /dev/null | gzip -9c > Packages.gz
+
+          cat << 'EOF' > install.sh
+          #!/usr/bin/bash
+          set -e
+          echo "Setting up bitcalc repository..."
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ca-certificates curl
+
+          cat << 'REPO' | sudo tee /etc/apt/sources.list.d/bitcalc.sources > /dev/null
+          Types: deb
+          URIs: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+          Suites: ./
+          Trusted: yes
+          REPO
+
+          echo "Installing bitcalc..."
+          sudo apt-get update -qq
+          sudo apt-get install -y bitcalc
+
+          echo "Success! bitcalc is now installed. Type 'bitcalc --help' to get started."
+          EOF
+          chmod +x install.sh
 
       - name: Deploy APT Repo to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
