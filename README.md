@@ -24,3 +24,9 @@ To install it, run
 ``` bash
 curl -fsSL https://ridddle-en.github.io/bitcalc/install.sh | bash
 ````
+
+To uninstall it, run
+
+``` bash
+curl -fsSL https://ridddle-en.github.io/bitcalc/uninstall.sh | bash
+````
