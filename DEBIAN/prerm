@@ -1,0 +1,17 @@
+#!/usr/bin/bash
+set -e
+
+case "$1" in
+	remove|purge)
+		echo "Removing compiled bitcalc binary"
+		rm -f /usr/bin/bitcalc
+		;;
+	upgrade|failed-upgrade|deconfigure)
+		;;
+	*)
+		echo "prerm called with unknown argument \`$1'" >&2
+		exit 1
+		;;
+esac
+
+exit 0
