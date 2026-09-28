@@ -271,7 +271,7 @@ print_unary_verbose() {
 		printf "%-14s-> %b\n" "1comp" "${CYAN}$(dec_to_bin "$comp1_dec" "$WIDTH")${RESET}"
 		printf "%-14s %b\n" "" "+ $(printf "%${WIDTH}s" "1")"
 		echo -e "..................................."
-		printf "%-14s %b\n" "2comp" "${num_raw}	-> ${GREEN}$(dec_to_bin "$res" "$WIDTH")${RESET}"
+		printf "%-14s-> %b\n" "2comp ${num_raw}" "${GREEN}$(dec_to_bin "$res" "$WIDTH")${RESET}"
 	else
 		printf "${CYAN}%-14s${RESET} %b\n" "${num_raw}" "$(dec_to_bin "$(twos_comp "$num")" "$WIDTH")"
 		echo -e ".............................."
