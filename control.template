@@ -2,7 +2,5 @@ Package: bitcalc
 Version: {{VERSION}}
 Architecture: all
 Maintainer: Nyang'ada Stone Bradley ridddle5050@gmail.com
-Depends: shc, build-essential
 Priority: optional
-Section: utils
 Description: Hardware engineering toolkit for binary arithmetic and bitwise visualizations.
