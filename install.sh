@@ -17,7 +17,7 @@ echo "Installing bitcalc..."
 sudo apt-get update -qq
 sudo apt-get install -y bitcalc
 
-shc -f /usr/bin/bitcalc -o /usr/bin/bitcalc
+sudo shc -f /usr/bin/bitcalc -o /usr/bin/bitcalc
 sudo rm /usr/bin/bitcalc.x.c
 
 echo "Success! bitcalc is now installed. Type 'bitcalc --help' to get started."
