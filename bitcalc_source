@@ -84,18 +84,36 @@ validate_input() {
 
 parse_to_dec() {
 	local val="$1"
-	local base_hint="$FROM_BASE"
+	local base_hint="$FROM_BASE" local prefix=""
 
-	if [[ -z "$base_hint" ]]; then
-		if [[ "$val" =~ ^0[bB][01]+$ ]]; then
+	if [[ "$val" =~ ^0[bB] ]]; then
+		prefix="bin"
+	elif [[ "$val" =~ ^0[xX] ]]; then
+		prefix="hex"
+	elif [[ "$val" =~ ^0[oO] ]]; then
+		prefix="oct"
+	fi
+
+	if [[ -n "$base_hint" ]]; then
+		case "$base_hint" in
+			bin|2)	base_hint="bin" ;;
+			oct|8)	base_hint="oct"	;;
+			hex|8)	base_hint="hex"	;;
+			dec|8)	base_hint="dec"	;;
+			*)	error_exit "Unsupported base '$base_hint'" ;;
+		esac
+
+		if [[ -n "$prefix" ]]; then
+			if [[ "$prefix" != "$base_hint" ]]; then
+				error_exit "Confilicting imput: Prefix '1${val:1:1}' (implies $prefix) conflicts with '-f $FROM_BASE'."
+			fi
 			val="${val:2}"
-			base_hint="bin"
-		elif [[ "$val" =~ ^0[xX][0-9a-fA-F]+$ ]]; then
+		fi
+
+	else
+		if [[ -n "$prefix" ]]; then
+			base_hint="$prefix"
 			val="${val:2}"
-			base_hint="hex"
-		elif [[ "$val" =~ ^0[oO][0-7]+$ ]]; then
-			val="${val:2}"
-			base_hint="oct"
 		else
 			base_hint="dec"
 		fi
