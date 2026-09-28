@@ -5,7 +5,7 @@ echo "Setting up bitcalc repository..."
 sudo apt-get update -qq
 sudo apt-get install -y -qq ca-certificates curl
 
-cat << 'REPO' | tee /etc/apt/sources.list.d/bitcalc.sources > /dev/null
+cat << 'REPO' | sudo tee /etc/apt/sources.list.d/bitcalc.sources > /dev/null
 Types: deb
 URIs: https://RIDDDLE-EN.github.io/bitcalc
 Suites: ./
