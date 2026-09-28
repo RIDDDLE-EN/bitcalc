@@ -52,17 +52,17 @@ jobs:
           sudo dpkg -i "bitcalc_${VERSION}_all.deb"
 
           echo "Testing binary execution"
-          bitcalc --help > /dev/null
+          /usr/share/bitcalc/bitcalc_source --help > /dev/null
 
           echo "Testing mathematical output..."
-          OUTPUT=$(bitcalc -q 10 ADD 2)
+          OUTPUT=$(/usr/share/bitcalc/bitcalc_source -q 10 ADD 2)
           if [ "$OUTPUT" != "12" ]; then
             echo "Test failed: Expected 12, got $OUTPUT"
             exit
           fi
 
           echo "Testing Base Conversion..."
-          OUTPUT=$(bitcalc -q -t bin 0xA)
+          OUTPUT=$(/usr/share/bitcalc/bitcalc_source -q -t bin 0xA)
           if [ "$OUTPUT" != "0b00001010" ]; then
             echo "Test Failed: Expected 0b00001010 got $OUTPUT"
             exit 1
