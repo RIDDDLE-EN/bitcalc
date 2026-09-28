@@ -82,7 +82,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq ca-certificates curl
 
-          cat << 'REPO' | tee /etc/apt/sources.list.d/bitcalc.sources > /dev/null
+          cat << 'REPO' | sudo tee /etc/apt/sources.list.d/bitcalc.sources > /dev/null
           Types: deb
           URIs: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
           Suites: ./
