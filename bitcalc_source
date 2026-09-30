@@ -21,6 +21,13 @@ rational_re="^[0-9]+\.[0-9]+$"
 neg_re="^-[0-9]+$"
 neg_rational_re="^-[0-9]+\.[0-9]+$"
 
+if [[ $WIDTH -eq 64 ]];then 
+mask=1
+else
+mask=$(( (1 << WIDTH) - 1 ))
+fi
+
+
 error_exit() {
 	echo -e "${RED}Error:${RESET} $1" >&2
 	exit 1
@@ -67,7 +74,8 @@ EXAMPLES:
 	bitcalc -w 8 0b010000001 ROL 1
 	bitcalc -w 16 0xABCD BSWAP
 	bitcalc 0b10110110 POPCNT
-	bitcalc -v 0b1011 ADD 0b0110bitcalc 10 LSHIFT 2 | bitcalc -t hex
+	bitcalc -v 0b1011 ADD 0b0110
+bitcalc 10 LSHIFT 2 | bitcalc -t hex
 EOF
 }
 
@@ -180,7 +188,6 @@ carry() {
 
 twos_comp() {
 	local num="$1"
-	local mask=$(( (1 << WIDTH) - 1 ))
 	echo $(( num < 0 ? (((~(-num)) + 1) & mask) : num ))
 }
 
@@ -189,7 +196,6 @@ x_shift() {
 	local n_b=$((b < 0 ? -b : b))
 	[[ $n_b -ge $WIDTH ]] && error_exit "Shift exceeds width."
 
-	local mask=$(( (1 << WIDTH) - 1 ))
 	if [[ "$v_shift" == "LSHIFT" ]]; then
 		echo $(( (b < 0 ? (a >> n_b) : (a << n_b)) & mask ))
 	else
@@ -200,7 +206,6 @@ x_shift() {
 x_ro() {
 	local a="$1" b="$2" v_rol="$3"
 	local n_b=$(( (b < 0 ? -b : b) % WIDTH ))
-	local mask=$(( (1 << WIDTH) - 1 ))
 
 	local rol=$(( ((a << n_b ) | (a >> (WIDTH - n_b))) & mask ))
 	local ror=$(( ((a >> n_b ) | (a << (WIDTH - n_b))) & mask ))
@@ -259,7 +264,7 @@ format_output() {
 }
 
 print_binary_add() {
-	local a=$1 b=$2 res=$3 mask=$4 op=$5 symbol=$6
+	local a=$1 b=$2 res=$3  op=$5 symbol=$6
 	n_res=$(( res & mask ))
 
 	if [[ "$op" == "ADD" ]]; then
@@ -276,7 +281,6 @@ print_binary_add() {
 
 print_unary_verbose() {
 	local num_raw=$1 op="$2" num="$3" result="$4"
-	local mask=$(( (1 << WIDTH) - 1 ))
 
 	if [[ $num =~ $neg_re && "$op" == "2COMP" ]]; then
 		local abs_num=$(( -num ))
@@ -289,7 +293,7 @@ print_unary_verbose() {
 		printf "%-14s-> %b\n" "1comp" "${CYAN}$(dec_to_bin "$comp1_dec" "$WIDTH")${RESET}"
 		printf "%-14s %b\n" "" "+ $(printf "%${WIDTH}s" "1")"
 		echo -e "..................................."
-		printf "%-14s-> %b\n" "2comp ${num_raw}" "${GREEN}$(dec_to_bin "$res" "$WIDTH")${RESET}"
+		printf "%-14s-> %b\n" "2comp ${num_raw}" "${GREEN}$(dec_to_bin "$result" "$WIDTH")${RESET}"
 	else
 		printf "${CYAN}%-14s${RESET} %b\n" "${num_raw}" "$(dec_to_bin "$(twos_comp "$num")" "$WIDTH")"
 		echo -e ".............................."
@@ -304,7 +308,6 @@ print_unary_verbose() {
 evaluate_math() {
 	local args=("$@")
 	local len=${#args[@]}
-	local mask=$(( (1 << WIDTH) - 1 ))
 	local res=0
 
 	if [[ $len -eq 1 ]]; then
