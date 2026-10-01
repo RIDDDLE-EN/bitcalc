@@ -1,4 +1,4 @@
-name: Build and Publish APT Repository
+name: Build, Sign, Test and Publish APT Repository
 
 on:
   push:
@@ -15,10 +15,18 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install APT Packaging Tools
-        run: sudo apt-get update && sudo apt-get install -y dpkg-dev gzip 
+      - name: Install Build Tools and shc
+        run: |
+          sudo apt-get update 
+          sudo apt-get install -y dpkg-dev gzip apt-utils shc gcc build-essential gnupg
 
-      - name: Build Debian Package
+      - name: Import GPG Private Key
+        env: 
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+
+      - name: Compile and Build Debian Package
         run: |
           VERSION=${GITHUB_REF_NAME#v}
 
@@ -26,11 +34,11 @@ jobs:
           mkdir -p build_dir/usr/share/man/man1
           mkdir -p build_dir/DEBIAN
 
-          sed "s/{{VERSION}}/$VERSION/g" control.template > build_dir/DEBIAN/control
-          
-          cp bitcalc_source build_dir/usr/bin/bitcalc
+          shc -f bitcalc_source -o build_dir/usr/bin/bitcalc
           chmod 755 build_dir/usr/bin/bitcalc
-          sed -i 's/\r$//' build_dir/usr/bin/bitcalc
+          rm -f bitcalc_source.x.c
+
+          sed "s/{{VERSION}}/$VERSION/g" control.template > build_dir/DEBIAN/control
 
           if [ -f "bitcalc.1" ]; then
             cp bitcalc.1 build_dir/usr/share/man/man1/bitcalc.1
@@ -40,11 +48,52 @@ jobs:
 
           dpkg-deb --root-owner-group --build build_dir bitcalc_${VERSION}_all.deb
 
-      - name: Test Installed Package
+      - name: Build and Sign APT Repository Structure
+        run: |
+          REPO_DIR="apt-repo"
+          MAIN_DIR="$REPO_DIR/dists/stable/main/binary-amd64
+          POOL_DIR="$REPO_DIR/pool/main
+
+          mkdir -p "$MAIN_DIR"
+          mkdir -p "$POOL_DIR"
+`
+          cp bitcalc-pub.asc "$REPO_DIR/"
+
+          mv *.deb "$POOL_DIR"
+
+          cd "$REPO_DIR"
+
+          dpkg-scanpackages --arch amd64 pool/main > dists/stable/main/binary-amd64/Packages
+          cat dists/stable/main/binary-amd64/Packages | gzip -9c > dists/stable/main/binary-amd64/Packages.gz
+
+          cat <<EOF > apt-release.conf
+          APT::FTPArchive::Release::Origin "Bitcalc";
+          APT::FTPArchive::Release::Suite "stable";
+          APT::FTPArchive::Release::Codename "stable";
+          APT::FTPArchive::Release::Architectures "amd64";
+          APT::FTPArchive::Release::Components "main";
+          EOF
+
+          apt-ftparchive -c apt-release.conf release dists/stable > dists/stable/Release
+
+          gpg --default-key "ridddle5050@gmail.com" -abs -o dists/stable/Release.gpg dists/stable/Release
+          gpg --defualt-key "ridddle5050@gmail.com" --clearsign -o dists/stable/InRelease dists/stable/Release
+
+      - name: Test Installed Package locally
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           echo "Installing the built package locally for testing..."
-          sudo dpkg -i "bitcalc_${VERSION}_all.deb"
+          cd apt-repo
+          python3 -m http.server 8080 &
+          SERVER_PID=$!
+          sleep 2
+
+          echo "Simulating user environment"
+          sudo cp bitcalc-pub.asc /etc/apt/keyrings/bitcacl.asc
+          echo "deb [arch-amd64 signed-by=/etc/keyrings/bitcalc.asc] http://localhost:8080/ stable main" | sudo tee /etc/apt/sources.list.d//bitcalc-test.list
+
+          sudo apt-get update
+          sudo apt-get install -y bitcalc
 
           echo "Testing binary execution"
           bitcalc --help > /dev/null
@@ -64,59 +113,7 @@ jobs:
           fi
 
           echo "All structural and logic tests passed successfully!"
-
-      - name: Generate APT Repository Index & Easy-Install Script
-        run: |
-          mkdir -p apt-repo/pool/main
-          mv *.deb apt-repo/pool/main/
-          cd apt-repo
-          dpkg-scanpackages pool/main /dev/null | gzip -9c > Packages.gz
-
-          cat << 'EOF' > install.sh
-          #!/usr/bin/bash
-          set -e
-          echo "Setting up bitcalc repository..."
-
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ca-certificates curl shc
-
-          cat << 'REPO' | sudo tee /etc/apt/sources.list.d/bitcalc.sources > /dev/null
-          Types: deb
-          URIs: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
-          Suites: ./
-          Trusted: yes
-          REPO
-
-          echo "Installing bitcalc..."
-
-          sudo apt-get update -qq
-          sudo apt-get install -y bitcalc
-
-          sudo shc -f /usr/bin/bitcalc -o /usr/bin/bitcalc
-          sudo rm /usr/bin/bitcalc.x.c
-
-          echo "Success! bitcalc is now installed. Type 'bitcalc --help' to get started."
-          EOF
-          sudo chmod +x install.sh
-
-          cat<< 'EOF' > uninstall.sh
-          #!/usr/bin/bash
-          set -e
-          echo "Removing bitcalc..."
-
-          if dpkg -l | grep -q bitcalc; then
-            sudo apt-get remove -y bitcalc
-          fi
-
-          if [ -f /etc/apt/sources.list.d/bitcalc.sources ]; then
-            echo "Removing bitcalc repository source..."
-            sudo rm -f /etc/apt/sources.list.d/bitcalc.sources
-            sudo apt-get update -qq
-          fi
-
-          echo "bitcalc has been successfully uninstalled from your system."
-          EOF
-          sudo chmod +x uninstall.sh
+          kill $SERVER_ID
 
       - name: Deploy APT Repo to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
