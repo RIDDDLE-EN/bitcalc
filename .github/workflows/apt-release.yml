@@ -89,7 +89,7 @@ jobs:
           sleep 2
 
           echo "Simulating user environment"
-          sudo cp bitcalc-pub.asc /etc/apt/keyrings/bitcacl.asc
+          sudo cp bitcalc-pub.asc /etc/apt/keyrings/bitcalc.asc
           echo "deb [arch-amd64 signed-by=/etc/keyrings/bitcalc.asc] http://localhost:8080/ stable main" | sudo tee /etc/apt/sources.list.d//bitcalc-test.list
 
           sudo apt-get update

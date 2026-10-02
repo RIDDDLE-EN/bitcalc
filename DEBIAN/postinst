@@ -1,0 +1,10 @@
+#!/usr/bin/bash
+set -e
+
+case "$1" in 
+	configure)
+		chmod 755 /usr/bin/bitcalc
+		;;
+esac
+
+exit 0

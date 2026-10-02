@@ -1,0 +1,8 @@
+Package: bitcalc
+Version: {{VERSION}}
+Architecture: amd64
+Maintaniner: Nyang'ada Stone Bradley <ridddle5050@gmail.com>
+Priority: optional
+Section: utils
+Depends: libc6
+Description: Hardware engineering toolkit for binary arithmetic and bitwise visualizations.
