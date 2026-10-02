@@ -1,0 +1,32 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+Architectures: amd64
+Codename: stable
+Components: main
+Date: Fri, 02 Oct 2026 17:05:06 +0000
+Origin: Bitcalc
+Suite: stable
+MD5Sum:
+ 4eb8071b50337bf970a66b1e3d13f55b              123 Release
+ f5efa9b13e208b81675446eb33f8704d              470 main/binary-amd64/Packages
+ c0cfa3c14695dd87cf1dfd93b17fa879              360 main/binary-amd64/Packages.gz
+SHA1:
+ 0cb2c1225f99c07d23ebdc1d56019814e36c51ce              123 Release
+ b0ba59b26afba44d615e517c3a703b8d981c65a2              470 main/binary-amd64/Packages
+ 24bc10e31b2c32efc11fef7935d66c978e516547              360 main/binary-amd64/Packages.gz
+SHA256:
+ ca6c818a03a51a12802cf2aea65fd317f28d189bbb562de411a3ada413e095fb              123 Release
+ 5d290d88fea5b03257b0359f9d60eb2eacb00f40a7a9f29d15812b5d7139a718              470 main/binary-amd64/Packages
+ d00b3458637d2ea1a790a33d6e78553939c6eaa417c6999591ad68647203119f              360 main/binary-amd64/Packages.gz
+SHA512:
+ 16827cb607ff45561658fd9bccbebd0f7ed83e756a101a3066a87ee2458c3a9ea14c0dfb071959aaecc5e584dbb3fa099917168d27a7b8c058f59ea825b2e1aa              123 Release
+ 59703adbbfc64543b7cdfd3320f1daaa9d57b6b3ae38f6a16a0f1abe7b53985e0f3e9ddeb12331e2ad591345d6f610304fa1f9d958fa5986a32e8748d75058b6              470 main/binary-amd64/Packages
+ 098e49cd8a9df7d074c289a6686e28818d73dd2fcdf4a959c401b17e76d0602a48d0a15a257c73bfbb89003e9c255735825b25afba1687f9a26cd1f39e3790ac              360 main/binary-amd64/Packages.gz
+-----BEGIN PGP SIGNATURE-----
+
+iIwEARYKADQWIQTSgzxdqREAQq13geLSMqGVbWaSywUCar/kQhYccmlkZGRsZTUw
+NTBAZ21haWwuY29tAAoJENIyoZVtZpLL+9MA/2xlhTtzoiGTQgwK3kKrFgJfFWjk
+itK1WAN0daUtFyRDAQDIVfdOH9ePxz9IEQlDP6PRiBuMxR88brPEqwUvX1rAAQ==
+=VIc3
+-----END PGP SIGNATURE-----

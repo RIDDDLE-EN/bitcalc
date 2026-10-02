@@ -1,0 +1,14 @@
+Package: bitcalc
+Version: 1.1.1
+Architecture: amd64
+Depends: libc6
+Filename: pool/main/bitcalc_1.1.1_all.deb
+Size: 21280
+MD5sum: d06ae6237c758b5e08b776e5be27d410
+SHA1: 88136a83e5c44fd807f44fb3530ff571c7017eaa
+SHA256: baa6b07f7eb02667bb460b00995b17314c6f28eb3d07dc0828526415a4a638ac
+Section: utils
+Priority: optional
+Description: Hardware engineering toolkit for binary arithmetic and bitwise visualizations.
+Maintaniner: Nyang'ada Stone Bradley <ridddle5050@gmail.com>
+
