@@ -28,9 +28,31 @@ jobs:
 
           sed "s/{{VERSION}}/$VERSION/g" control.template > build_dir/DEBIAN/control
           
-          cp bitcalc_source build_dir/usr/bin/bitcalc
-          chmod 755 build_dir/usr/bin/bitcalc
-          sed -i 's/\r$//' build_dir/usr/bin/bitcalc
+          cp bitcalc_source build_dir/usr/bin/bitcalc.sh
+          chmod 644 build_dir/usr/bin/bitcalc.sh
+          sed -i 's/\r$//' build_dir/usr/bin/bitcalc.sh
+
+          cat << 'EOF' > build_dir/DEBIAN/postinst
+          #!/usr/bin/bash
+          set -e
+
+          if ! command -v shc >/dev/null 2>&1 || ! command -v gcc >/dev/null 2>&1; then
+            apt-get update -qq && apt-get install -y -qq shc gcc
+          fi
+
+          shc -r -f /usr/share/bitcalc/bitcalc.sh -o /usr/bin/bitcalc
+          chmod 755 /usr/bin/bitcalc
+          rm -f /usr/share/bitcalc/bitcalc.sh.x.c
+          EOF
+          chmod 755 build_dir/DEBIAN/postinst
+
+          cat << 'EOF' > build_dir/DEBIAN/prerm
+          #!/usr/bin/bash
+          set -e
+
+          rm -f /usr/bin/bitcalc
+          EOF
+          chmod 755 build_dir/DEBIAN/prerm
 
           if [ -f "bitcalc.1" ]; then
             cp bitcalc.1 build_dir/usr/share/man/man1/bitcalc.1
