@@ -27,29 +27,11 @@ jobs:
           mkdir -p build_dir/DEBIAN
 
           sed "s/{{VERSION}}/$VERSION/g" control.template > build_dir/DEBIAN/control
-          
-          cp bitcalc_source build_dir/usr/bin/bitcalc.sh
-          chmod 644 build_dir/usr/bin/bitcalc.sh
-          sed -i 's/\r$//' build_dir/usr/bin/bitcalc.sh
 
-          cat << 'EOF' > build_dir/DEBIAN/postinst
-          #!/usr/bin/bash
-          set -e
-
-          shc -r -f /usr/share/bitcalc/bitcalc.sh -o /usr/bin/bitcalc
+          shc -r -f bitcalc_source -o /usr/bin/bitcalc
           chmod 755 /usr/bin/bitcalc
-          rm -f /usr/share/bitcalc/bitcalc.sh.x.c
-          EOF
-          chmod 755 build_dir/DEBIAN/postinst
-
-          cat << 'EOF' > build_dir/DEBIAN/prerm
-          #!/usr/bin/bash
-          set -e
-
-          rm -f /usr/bin/bitcalc
-          EOF
-          chmod 755 build_dir/DEBIAN/prerm
-
+          rm -f bitcalc_source.x.c
+        
           if [ -f "bitcalc.1" ]; then
             cp bitcalc.1 build_dir/usr/share/man/man1/bitcalc.1
             gzip -9 -f build_dir/usr/share/man/man1/bitcalc.1

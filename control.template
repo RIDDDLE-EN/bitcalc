@@ -1,6 +1,6 @@
 Package: bitcalc
 Version: {{VERSION}}
-Architecture: all
+Architecture: amd64
 Maintainer: Nyang'ada Stone Bradley ridddle5050@gmail.com
 Priority: optional
 Section: utils
