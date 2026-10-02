@@ -28,8 +28,8 @@ jobs:
 
           sed "s/{{VERSION}}/$VERSION/g" control.template > build_dir/DEBIAN/control
 
-          shc -r -f bitcalc_source -o /usr/bin/bitcalc
-          chmod 755 /usr/bin/bitcalc
+          shc -r -f bitcalc_source -o build_dir/usr/bin/bitcalc
+          chmod 755 build_dir/usr/bin/bitcalc
           rm -f bitcalc_source.x.c
         
           if [ -f "bitcalc.1" ]; then
@@ -38,13 +38,13 @@ jobs:
             chmod 644 build_dir/usr/share/man/man1/bitcalc.1.gz
           fi
 
-          dpkg-deb --root-owner-group --build build_dir bitcalc_${VERSION}_all.deb
+          dpkg-deb --root-owner-group --build build_dir bitcalc_${VERSION}_amd64.deb
 
       - name: Test Installed Package
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           echo "Installing the built package locally for testing..."
-          sudo dpkg -i "bitcalc_${VERSION}_all.deb"
+          sudo dpkg -i "bitcalc_${VERSION}_amd64.deb"
 
           echo "Testing binary execution"
           bitcalc --help > /dev/null
