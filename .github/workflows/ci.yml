@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call: 
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck -x -S warning src/bitcalc scripts/*.sh packaging/install.sh packaging/uninstall.sh completions/bitcalc.bash tests/*.sh
+      - name: man page renders without warnings
+        run: |
+          sed 's/@DATE@/test/;s/@VERSION@/test/' man/bitcalc.1 | nroff -man -ww -z 2>&1 | tee /tmp/man.log
+          test ! -s /tmp/man.log
+
+  test:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: tests/run.sh
+      - run: tests/fuzz.sh src/bitcalc 500
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Work out the version
+        id: v
+        run: |
+          if [[ $GITHUB_REF_TYPE == tag ]]; then
+            v=${GITHUB_REF_NAME#v}
+          else
+            v="0.0.0+ci.${GITHUB_RUN_NUMBER}"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Build .deb
+        run: scripts/build-deb.sh "${{ steps.v.outputs.version }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb
+          path: dist/*.deb
+          if-no-files-found: error
+
+  install-test:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["ubuntu:22.04", "ubuntu:24.04", "debian:12"]
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: deb
+          path: dist
+      - name: Install the package like a user would
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq python3 man-db >/dev/null
+          apt-get install -y ./dist/*.deb
+      - name: Only the program is installed (no source tree)
+        run: |
+          dpkg -L bitcalc | grep -v '/$'
+          test -x /usr/bin/bitcalc
+          ! dpkg -L bitcalc | grep -E 'src/|\.sh$|bitcalc_source'
+      - name: Version matches the package
+        run: |
+          want="${{ needs.build.outputs.version }}"
+          test "$(bitcalc --version)" = "bitcalc $want"
+      - name: Test the installed binary
+        run: |
+          tests/run.sh /usr/bin/bitcalc
+          tests/fuzz.sh /usr/bin/bitcalc 200
+      - name: Man page and completion are in place
+        run: |
+          man -w bitcalc
+          test -f /usr/share/bash-completion/completions/bitcalc
+      - name: Clean removal
+        run: |
+          apt-get remove -y bitcalc
+          ! command -v bitcalc
