@@ -95,19 +95,20 @@ ok "pipeline" "0x28" "$("$BIN" -q 10 LSHIFT 2 | "$BIN" -q -t hex)"
 ok "non-tty is quiet by default" "12" "$("$BIN" 10 ADD 2)"
 
 # --- verbose output --------------------------------------------------------
+ret=$?
 v() { "$BIN" -v --no-color "$@" 2>&1; }
 out=$(v 10 ADD 3)
-[[ $out == *carry* && $out == *"flags"* && $out == *"ans_dec = 13"* ]]; ok "verbose add rows" 0 $?
+[[ $out == *carry* && $out == *"flags"* && $out == *"ans_dec = 13"* ]]; ok "verbose add rows" 0 "$ret"
 out=$(v -T 10 AND 12)
-[[ $out == *"truth table: AND"* && $out == *"used"* ]]; ok "truth table shown" 0 $?
+[[ $out == *"truth table: AND"* && $out == *"used"* ]]; ok "truth table shown" 0 "$ret"
 out=$(v -T 10 LSHIFT -2)
-[[ $out == *"runs as RSHIFT 2"* && $out == *"bit map"* ]]; ok "negative shift explained" 0 $?
+[[ $out == *"runs as RSHIFT 2"* && $out == *"bit map"* ]]; ok "negative shift explained" 0 "$ret"
 # every verbose line must be aligned: the '=' sits in the same column on all rows
 out=$(v -w 16 0x1234 AND 0x00FF | grep ' = ')
 cols=$(while IFS= read -r l; do pre=${l%% = *}; echo "${#pre}"; done <<<"$out" | sort -u | wc -l)
 ok "verbose '=' column aligned" 1 "$cols"
 out=$(v 5 ADD 3 | tr -d '\033')
-[[ $out != *$'\033'* ]]; ok "no escape codes with --no-color" 0 $?
+[[ $out != *$'\033'* ]]; ok "no escape codes with --no-color" 0 "$ret"
 
 # --- meta ------------------------------------------------------------------
 ok "version flag" "bitcalc" "$("$BIN" --version | cut -d' ' -f1)"
