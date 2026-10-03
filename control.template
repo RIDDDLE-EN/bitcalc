@@ -1,8 +1,0 @@
-Package: bitcalc
-Version: {{VERSION}}
-Architecture: amd64
-Maintainer: Nyang'ada Stone Bradley ridddle5050@gmail.com
-Priority: optional
-Section: utils
-Depends: bash (>= 4.0)
-Description: Hardware engineering toolkit for binary arithmetic and bitwise visualizations.
