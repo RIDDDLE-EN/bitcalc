@@ -1,0 +1,1035 @@
+#!/usr/bin/env bash
+set -u -o pipefail
+
+VERSION="@VERSION@"
+[[ $VERSION == "@"*"@" ]] && VERSION="dev"
+
+if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
+	printf 'bitcalc: bash 4.4 or newer is required (found %s)\n' "$BASH_VERSION" >&2
+	exit 1
+fi
+
+FROM_BASE="" FROM_N=0 TO_BASE="dec"
+WIDTH=8 WIDTH_SET=0 MASK=255 SIGN=128 PRECISION=8
+VERBOSE=-1 TRUTH=0 UNSIGNED=0 SIGNED_MODE=0 USE_COLOR=auto INTERACTIVE=0
+MIN64=$((1 << 63))
+ANS_FILE="" ANS=""
+BOLD="" GREEN="" CYAN="" YELLOW="" DIM="" RESET=""
+ARGS=()
+
+die() {
+	printf 'bitcalc: error: %s\n' "$*" >&2
+	exit 1
+}
+
+usage() {
+	cat <<'EOF'
+bitcalc - bitwise operations, base conversion and bit-level visualisation
+
+USAGE
+  bitcalc [FLAGS] <NUMBER>                     convert / visualise a number
+  bitcalc [FLAGS] <NUMBER> <OPERATOR> <NUMBER>
+  bitcalc [FLAGS] <UNARY_OP> <NUMBER>          (or: <NUMBER> <UNARY_OP>)
+  echo "10 AND 12" | bitcalc [FLAGS]
+  bitcalc -i                                   interactive shell
+
+FLAGS
+  -f, --from BASE    input base: bin oct dec hex   (default: from 0b/0o/0x prefix)
+  -t, --to BASE      output base: bin oct dec hex bcd gray   (default: dec)
+  -w, --width BITS   register width, 2..64          (default: smallest of 8/16/32/64)
+      --prec N       fractional bits for dec -> bin (default: 8)
+  -q, --quiet        print only the result
+  -v, --verbose      always show the working (default when stdout is a terminal)
+  -T, --truth        add truth tables / bit-mapping tables to the working
+  -u, --unsigned     show decimal results unsigned even for negative input
+      --no-color     disable colour (NO_COLOR is honoured too)
+  -i, --interactive  start the REPL
+  -V, --version      print version
+  -h, --help         this text (full manual: man bitcalc)
+
+OPERATORS (case-insensitive; symbols in brackets)
+  Arithmetic  ADD [+]  SUB [-]  MUL [*]  DIV [/]  MOD [%]
+  Logic       AND [&]  OR [|]  XOR [^]  NAND  NOR  XNOR
+  Shift       LSHIFT [<<]  RSHIFT [>>]  ASR [>>>]      negative count = other direction
+  Rotate      ROL  ROR                                  negative count = other direction
+  Unary       NOT [~]  1COMP  2COMP  NEG  BSWAP  POPCNT  CLZ  CTZ  REV  PARITY
+
+EXAMPLES
+  bitcalc 10 AND -2
+  bitcalc -w 16 0xABCD BSWAP
+  bitcalc -T 0b10110001 ROL -3
+  bitcalc -t hex 255 ADD 1
+  bitcalc --prec 12 13.625
+  bitcalc -q 10 LSHIFT 2 | bitcalc -t hex
+EOF
+}
+
+init_colors() {
+	if [[ $USE_COLOR == auto ]]; then
+		if [[ -t 1 && -z ${NO_COLOR:-} ]]; then USE_COLOR=1; else USE_COLOR=0; fi
+	fi
+	if ((USE_COLOR == 1 && VERBOSE == 1)); then
+		BOLD=$'\033[1m' GREEN=$'\033[32m' CYAN=$'\033[36m'
+		YELLOW=$'\033[33m' DIM=$'\033[2m' RESET=$'\033[0m'
+	else
+		BOLD="" GREEN="" CYAN="" YELLOW="" DIM="" RESET=""
+	fi
+}
+
+set_width() {
+	WIDTH=$1
+	if ((WIDTH >= 64)); then MASK=-1; else MASK=$(((1 << WIDTH) - 1)); fi
+	SIGN=$((1 << (WIDTH - 1)))
+}
+
+sext() {
+	if ((WIDTH < 64 && ($1 & SIGN))); then S=$(($1 - (1 << WIDTH))); else S=$1; fi
+}
+
+lsr() {
+	if (($2 <= 0)); then R=$1
+	elif (($2 >= 64)); then R=0
+	else R=$((($1 >> $2) & ((1 << (64 - $2)) - 1))); fi
+}
+
+ult() { (((${1} ^ MIN64) < (${2} ^ MIN64))); }
+
+bits() {
+	local p=$1 w=${2:-$WIDTH} i s=""
+	for ((i = w - 1; i >= 0; i--)); do s+=$(((p >> i) & 1)); done
+	BITS=$s
+}
+
+group() {
+	local s=$1 n=${#1} gs i first out=""
+	if ((n <= 4)); then GB=$s; return; fi
+	((n <= 16)) && gs=4 || gs=8
+	first=$((n % gs))
+	((first)) && out="${s:0:first} "
+	for ((i = first; i < n; i += gs)); do out+="${s:i:gs} "; done
+	GB=${out% }
+}
+gbits() { bits "$1" "${2:-$WIDTH}"; group "$BITS"; }
+
+base_num() {
+	case ${1,,} in
+	bin | 2) BASE_N=2 ;;
+	oct | 8) BASE_N=8 ;;
+	dec | 10) BASE_N=10 ;;
+	hex | 16) BASE_N=16 ;;
+	*) return 1 ;;
+	esac
+}
+
+parse_number() {
+	local raw=$1 v=$1 base=10 neg=0 t u p
+	[[ $v == -* ]] && { neg=1; v=${v:1}; }
+	[[ $v == +* ]] && v=${v:1}
+	[[ -z $v ]] && die "'$raw' is not a number"
+	if [[ -n $FROM_BASE ]]; then
+		base=$FROM_N
+		case $base in
+		2) [[ $v == 0[bB]* ]] && v=${v:2} ;;
+		8) [[ $v == 0[oO]* ]] && v=${v:2} ;;
+		16) [[ $v == 0[xX]* ]] && v=${v:2} ;;
+		esac
+	else
+		case $v in
+		0[bB]*) base=2; v=${v:2} ;;
+		0[xX]*) base=16; v=${v:2} ;;
+		0[oO]*) base=8; v=${v:2} ;;
+		esac
+	fi
+	[[ -z $v ]] && die "no digits after the prefix in '$raw'"
+	t=${v#"${v%%[!0]*}"}
+	[[ -z $t ]] && t=0
+	case $base in
+	2)
+		[[ $v =~ ^[01]+$ ]] || die "'$raw' is not binary (digits 0-1 only)"
+		((${#t} <= 64)) || die "'$raw' is wider than 64 bits"
+		;;
+	8)
+		[[ $v =~ ^[0-7]+$ ]] || die "'$raw' is not octal (digits 0-7 only)"
+		((${#t} < 22 || (${#t} == 22 && ${t:0:1} <= 1))) || die "'$raw' is wider than 64 bits"
+		;;
+	16)
+		[[ $v =~ ^[0-9a-fA-F]+$ ]] || die "'$raw' is not hexadecimal (digits 0-9, A-F)"
+		((${#t} <= 16)) || die "'$raw' is wider than 64 bits"
+		;;
+	10)
+		[[ $v =~ ^[0-9]+$ ]] || die "'$raw' is not a decimal number"
+		# shellcheck disable=SC2071  # intentional: same-length digit strings compare correctly
+		[[ ${#t} -lt 19 || (${#t} -eq 19 && ! $t > 9223372036854775807) ]] ||
+			die "'$raw' is too large for decimal input (max 9223372036854775807); use 0x... for bigger values"
+		;;
+	esac
+	u=$(( ${base}#$t ))
+	if ((neg)); then
+		if ((WIDTH < 64)); then
+			((u >= 0 && u <= (1 << (WIDTH - 1)))) ||
+				die "'$raw' does not fit in $WIDTH-bit two's complement (min -$((1 << (WIDTH - 1))))"
+		else
+			((u >= 0 || u == MIN64)) || die "'$raw' does not fit in 64-bit two's complement"
+		fi
+		p=$(((-u) & MASK))
+	else
+		if ((WIDTH < 64)); then
+			((u >= 0 && u <= MASK)) || die "'$raw' does not fit in $WIDTH bits (use --width)"
+		fi
+		p=$u
+	fi
+	NUM_P=$p NUM_NEG=$neg NUM_ABS=$u
+}
+
+parse_count() {
+	local sw=$WIDTH
+	set_width 64
+	parse_number "$1"
+	set_width "$sw"
+	if ((NUM_NEG)); then COUNT=$((-NUM_ABS)); else COUNT=$NUM_ABS; fi
+}
+
+req_bits() {
+	local u=$NUM_ABS n=0
+	if ((NUM_NEG)); then
+		if ((u == MIN64)); then REQ=64; return; fi
+		((u > 0)) && u=$((u - 1))
+	fi
+	while ((u != 0)); do
+		n=$((n + 1))
+		lsr "$u" 1
+		u=$R
+	done
+	((NUM_NEG)) && n=$((n + 1))
+	REQ=$n
+}
+
+prep_width() {
+	local need=8 r w
+	if ((WIDTH_SET)); then set_width "$WIDTH"; return; fi
+	set_width 64
+	for r in "$@"; do
+		parse_number "$r"
+		req_bits
+		((REQ > need)) && need=$REQ
+	done
+	if ((need <= 8)); then w=8; elif ((need <= 16)); then w=16
+	elif ((need <= 32)); then w=32; else w=64; fi
+	set_width "$w"
+}
+
+dec_disp() {
+	if ((SIGNED_MODE)); then sext "$1"; DD=$S; else printf -v DD '%u' "$1"; fi
+}
+
+note_of() {
+	local u s
+	printf -v u '%u' "$1"
+	sext "$1"
+	s=$S
+	if [[ $u == "$s" ]]; then NOTE="($u)"; else NOTE="(u:$u s:$s)"; fi
+}
+
+to_bcd() {
+	local i
+	BCD=""
+	for ((i = 0; i < ${#1}; i++)); do bits "${1:i:1}" 4; BCD+="$BITS "; done
+	BCD=${BCD% }
+}
+
+format_result() {
+	local p=$1 u
+	case $TO_BASE in
+	bin) bits "$p"; FMT="0b$BITS" ;;
+	oct) printf -v FMT '0o%o' "$p" ;;
+	hex) printf -v FMT '0x%0*X' $(((WIDTH + 3) / 4)) "$p" ;;
+	bcd) printf -v u '%u' "$p"; to_bcd "$u"; FMT=$BCD ;;
+	gray) lsr "$p" 1; bits $((p ^ R)); FMT="0b$BITS" ;;
+	*) dec_disp "$p"; FMT=$DD ;;
+	esac
+}
+
+ROW_L=() ROW_B=() ROW_N=() ROW_C=() ROW_G=()
+row() { ROW_L+=("$1"); ROW_B+=("$2"); ROW_N+=("${3:-}"); ROW_C+=("${4:-}"); ROW_G+=("${5:-=}"); }
+rule() { ROW_L+=(""); ROW_B+=(""); ROW_N+=(""); ROW_C+=(""); ROW_G+=("RULE"); }
+title() { printf '%s%s%s\n' "$BOLD" "$1" "$RESET"; }
+
+flush_rows() {
+	local i n=${#ROW_L[@]} lw=0 bw=0 line
+	for ((i = 0; i < n; i++)); do
+		[[ ${ROW_G[i]} == RULE ]] && continue
+		((${#ROW_L[i]} > lw)) && lw=${#ROW_L[i]}
+		((${#ROW_B[i]} > bw)) && bw=${#ROW_B[i]}
+	done
+	for ((i = 0; i < n; i++)); do
+		if [[ ${ROW_G[i]} == RULE ]]; then
+			printf -v line '%*s' $((lw + 3 + bw)) ''
+			printf '%s%s%s\n' "$DIM" "${line// /-}" "$RESET"
+		elif [[ -n ${ROW_N[i]} ]]; then
+			printf '%-*s %s %s%-*s%s  %s%s%s\n' "$lw" "${ROW_L[i]}" "${ROW_G[i]}" \
+				"${ROW_C[i]}" "$bw" "${ROW_B[i]}" "$RESET" "$DIM" "${ROW_N[i]}" "$RESET"
+		else
+			printf '%-*s %s %s%s%s\n' "$lw" "${ROW_L[i]}" "${ROW_G[i]}" \
+				"${ROW_C[i]}" "${ROW_B[i]}" "$RESET"
+		fi
+	done
+	ROW_L=() ROW_B=() ROW_N=() ROW_C=() ROW_G=()
+}
+
+operand_row() {
+	gbits "$2"
+	note_of "$2"
+	row "$1" "$GB" "$NOTE" "${3-$CYAN}"
+}
+
+res_rows() {
+	local u s alt=""
+	rule
+	gbits "$RES"
+	row "ans" "$GB" "" "$GREEN"
+	dec_disp "$RES"
+	printf -v u '%u' "$RES"
+	sext "$RES"
+	s=$S
+	if [[ $u != "$s" ]]; then
+		if ((SIGNED_MODE)); then alt="(unsigned: $u)"; else alt="(signed: $s)"; fi
+	fi
+	row "ans_dec" "$DD" "$alt" "$GREEN"
+	case $TO_BASE in
+	oct | hex | bcd | gray) format_result "$RES"; row "ans_$TO_BASE" "$FMT" "" "$GREEN" ;;
+	esac
+}
+
+flags_row() { # Z N C V ; clabel
+	local z=0 n
+	((RES == 0)) && z=1
+	n=$(((RES >> (WIDTH - 1)) & 1))
+	row "flags" "Z=$z N=$n ${3:-C}=$1 V=$2" "" "$YELLOW"
+}
+
+# --------------------------------------------------------- truth tables --
+bitop() { # op a b -> R
+	case $1 in
+	AND) R=$(($2 & $3)) ;;
+	OR) R=$(($2 | $3)) ;;
+	XOR) R=$(($2 ^ $3)) ;;
+	NAND) R=$((1 - ($2 & $3))) ;;
+	NOR) R=$((1 - ($2 | $3))) ;;
+	XNOR) R=$((1 - ($2 ^ $3))) ;;
+	NOT) R=$((1 - $2)) ;;
+	esac
+}
+
+truth_table() {
+	local op=$1 a=${2-} b=${3-} i x y have=0 note
+	local -a cnt=(0 0 0 0)
+	if [[ -n $a ]]; then
+		have=1
+		for ((i = 0; i < WIDTH; i++)); do
+			if [[ $op == NOT ]]; then
+				cnt[(a >> i) & 1]=$((cnt[(a >> i) & 1] + 1))
+			else
+				x=$(((a >> i) & 1)) y=$(((b >> i) & 1))
+				cnt[x * 2 + y]=$((cnt[x * 2 + y] + 1))
+			fi
+		done
+	fi
+	printf '\n%struth table: %s%s\n' "$BOLD" "$op" "$RESET"
+	if [[ $op == NOT ]]; then
+		printf '  A | %s\n ---+----\n' "$op"
+		for x in 0 1; do
+			bitop NOT "$x"
+			note=""
+			((have && cnt[x] > 0)) && note="  <- used ${cnt[x]}x"
+			printf '  %d |  %d%s\n' "$x" "$R" "$note"
+		done
+		return
+	fi
+	printf '  A B | %s\n -----+-%s\n' "$op" "${op//?/-}"
+	for x in 0 1; do
+		for y in 0 1; do
+			bitop "$op" "$x" "$y"
+			note=""
+			((have && cnt[x * 2 + y] > 0)) && note="  <- used ${cnt[x * 2 + y]}x"
+			printf '  %d %d | %*d%s\n' "$x" "$y" "${#op}" "$R" "$note"
+		done
+	done
+}
+
+shift_map() {
+	local eff=$1 n=$2 a=$3 d s v tag
+	printf '\n%sbit map%s (effective: %s %d)\n' "$BOLD" "$RESET" "$eff" "$n"
+	for ((d = WIDTH - 1; d >= 0; d--)); do
+		tag=""
+		case $eff in
+		LSHIFT) s=$((d - n)); ((s < 0)) && s=-1 ;;
+		RSHIFT) s=$((d + n)); ((s >= WIDTH)) && s=-1 ;;
+		ASR) s=$((d + n)); if ((s >= WIDTH)); then s=$((WIDTH - 1)); tag=" (sign copy)"; fi ;;
+		ROL) s=$(((d - n + WIDTH) % WIDTH)) ;;
+		ROR) s=$(((d + n) % WIDTH)) ;;
+		esac
+		if ((s < 0)); then
+			printf '  out[%2d] <- 0 (zero fill)\n' "$d"
+		else
+			v=$(((a >> s) & 1))
+			printf '  out[%2d] <- in[%2d]%s = %d\n' "$d" "$s" "$tag" "$v"
+		fi
+	done
+}
+
+op_addsub() { 
+	local op=$1 a=$2 b=$3 araw=$4 braw=$5 addend i ba bi c=0 cs="" v=0 sa sb sr fc fl
+	if [[ $op == SUB ]]; then addend=$(((-b) & MASK)); else addend=$b; fi
+	RES=$(((a + addend) & MASK))
+	((VERBOSE)) || return 0
+	for ((i = 0; i < WIDTH; i++)); do
+		ba=$(((a >> i) & 1)) bi=$(((addend >> i) & 1))
+		if ((c)); then cs="1$cs"; else cs=" $cs"; fi
+		c=$(((ba & bi) | (c & (ba ^ bi))))
+	done
+	sa=$(((a >> (WIDTH - 1)) & 1)) sb=$(((b >> (WIDTH - 1)) & 1)) sr=$(((RES >> (WIDTH - 1)) & 1))
+	if [[ $op == ADD ]]; then
+		((sa == sb && sr != sa)) && v=1
+		fc=$c fl=C
+	else
+		((sa != sb && sr != sa)) && v=1
+		if ult "$a" "$b"; then fc=1; else fc=0; fi
+		fl=B
+	fi
+	title "$araw $op $braw   [${WIDTH}-bit]"
+	group "$cs"
+	row "carry" "$GB" "" "$CYAN" ":"
+	operand_row "$araw" "$a"
+	operand_row "$braw" "$b"
+	if [[ $op == SUB ]]; then
+		gbits "$addend"
+		row "-($braw)" "$GB" "(two's complement of b: ~b + 1)" "$CYAN"
+		row "" "+" "(a - b is computed as a + (-b))" "$BOLD"
+	else
+		row "" "+" "" "$BOLD"
+	fi
+	res_rows
+	flags_row "$fc" "$v" "$fl"
+	flush_rows
+}
+
+op_mul() { 
+	local a=$1 b=$2 araw=$3 braw=$4 full c=0 v=0 sa sb sres ah al bh bl t hi lo tot u note="" i pp
+	RES=$(((a * b) & MASK))
+	((VERBOSE)) || return 0
+	sext "$a"; sa=$S; sext "$b"; sb=$S; sext "$RES"; sres=$S
+	if ((WIDTH <= 32)); then
+		full=$((a * b))
+		((((full >> WIDTH) != 0))) && c=1
+		((sa * sb != sres)) && v=1
+		if ((c)); then printf -v u '%u' "$full"; note="(truncated; exact unsigned product: $u)"; fi
+	else
+		ah=$(((a >> 32) & 0xFFFFFFFF)) al=$((a & 0xFFFFFFFF))
+		bh=$(((b >> 32) & 0xFFFFFFFF)) bl=$((b & 0xFFFFFFFF))
+		if ((ah && bh)); then
+			c=1
+		else
+			t=$((ah * bl + bh * al))
+			lsr "$t" 32
+			if ((R != 0)); then
+				c=1
+			else
+				hi=$((t << 32)) lo=$((al * bl)) tot=$((hi + lo))
+				ult "$tot" "$hi" && c=1
+			fi
+		fi
+		if ((sa != 0 && sb != 0)); then
+			if ((sa == -1 && sb == MIN64 || sa == MIN64 && sb == -1)); then v=1
+			elif ((sres / sa != sb)); then v=1; fi
+		fi
+		((c)) && note="(truncated to 64 bits)"
+	fi
+	title "$araw MUL $braw   [${WIDTH}-bit]"
+	operand_row "$araw" "$a"
+	operand_row "$braw" "$b"
+	row "" "*" "" "$BOLD"
+	res_rows
+	[[ -n $note ]] && row "" "" "$note" ""
+	flags_row "$c" "$v" "C"
+	flush_rows
+	if ((WIDTH <= 16 && !SIGNED_MODE)); then
+		printf '\n%spartial products%s (one row per 1-bit of b)\n' "$BOLD" "$RESET"
+		for ((i = 0; i < WIDTH; i++)); do
+			if (((b >> i) & 1)); then
+				pp=$((a << i))
+				gbits "$pp" $((WIDTH * 2))
+				row "a << $i" "$GB" "" "$CYAN"
+			fi
+		done
+		rule
+		gbits $((a * b)) $((WIDTH * 2))
+		row "sum" "$GB" "($((a * b)))" "$GREEN"
+		flush_rows
+	fi
+}
+
+op_div() {
+	local op=$1 a=$2 b=$3 araw=$4 braw=$5 q r sa sb v=0 qp rp
+	((b == 0)) && die "division by zero"
+	if ((SIGNED_MODE)); then
+		sext "$a"; sa=$S; sext "$b"; sb=$S
+		q=$((sa / sb)) r=$((sa % sb))
+		((sa == -(1 << (WIDTH - 1)) && sb == -1)) && v=1
+	else
+		((WIDTH == 64 && (a < 0 || b < 0))) &&
+			die "unsigned 64-bit $op above 9223372036854775807 is not supported (use a negative/signed operand or a smaller width)"
+		sa=$a sb=$b q=$((a / b)) r=$((a % b))
+	fi
+	qp=$((q & MASK)) rp=$((r & MASK))
+	if [[ $op == DIV ]]; then RES=$qp; else RES=$rp; fi
+	((VERBOSE)) || return 0
+	title "$araw $op $braw   [${WIDTH}-bit]"
+	operand_row "$araw" "$a"
+	operand_row "$braw" "$b"
+	row "" "$([[ $op == DIV ]] && echo / || echo %)" "" "$BOLD"
+	res_rows
+	if [[ $op == DIV ]]; then
+		gbits "$rp"; row "remainder" "$GB" "($r)" "$CYAN"
+	else
+		gbits "$qp"; row "quotient" "$GB" "($q)" "$CYAN"
+	fi
+	row "check" "$q * $sb + $r = $((q * sb + r))" "(a = q*b + r)" "$DIM"
+	((v)) && row "" "" "(overflow: most-negative value / -1 wraps)" ""
+	flush_rows
+}
+
+op_logic() {
+	local op=$1 a=$2 b=$3 araw=$4 braw=$5 sym
+	case $op in
+	AND) RES=$((a & b)); sym="&" ;;
+	OR) RES=$((a | b)); sym="|" ;;
+	XOR) RES=$((a ^ b)); sym="^" ;;
+	NAND) RES=$((~(a & b))); sym="~&" ;;
+	NOR) RES=$((~(a | b))); sym="~|" ;;
+	XNOR) RES=$((~(a ^ b))); sym="~^" ;;
+	esac
+	RES=$((RES & MASK))
+	((VERBOSE)) || return 0
+	title "$araw $op $braw   [${WIDTH}-bit]"
+	operand_row "$araw" "$a"
+	operand_row "$braw" "$b"
+	row "" "$sym  ($op)" "" "$BOLD"
+	res_rows
+	flush_rows
+	((TRUTH)) && truth_table "$op" "$a" "$b"
+	return 0
+}
+
+op_shift() {
+	local op=$1 a=$2 count=$3 araw=$4 braw=$5 eff=$1 n=$3 rot=0 sym note="" outv="" outw=0 cbit=0 hdr
+	if ((count < 0)); then
+		n=$((-count))
+		case $op in
+		LSHIFT) eff=RSHIFT ;; RSHIFT) eff=LSHIFT ;; ASR) eff=LSHIFT ;;
+		ROL) eff=ROR ;; ROR) eff=ROL ;;
+		esac
+		note="(negative count: $op $count runs as $eff $n)"
+	fi
+	case $eff in ROL | ROR) rot=1 ;; esac
+	((n < 0)) && die "shift count out of range"
+	if ((rot)); then
+		n=$((n % WIDTH))
+	else
+		((n >= WIDTH)) && die "shift count $n is not smaller than the register width ($WIDTH); use --width"
+	fi
+	case $eff in
+	LSHIFT)
+		RES=$(((a << n) & MASK)); sym="<<"
+		if ((n)); then lsr "$a" $((WIDTH - n)); outv=$R outw=$n; cbit=$(((a >> (WIDTH - n)) & 1)); fi ;;
+	RSHIFT)
+		lsr "$a" "$n"; RES=$R; sym=">>"
+		if ((n)); then outv=$((a & ((1 << n) - 1))) outw=$n; cbit=$(((a >> (n - 1)) & 1)); fi ;;
+	ASR)
+		sext "$a"; RES=$(((S >> n) & MASK)); sym=">>>"
+		if ((n)); then outv=$((a & ((1 << n) - 1))) outw=$n; cbit=$(((a >> (n - 1)) & 1)); fi ;;
+	ROL)
+		if ((n)); then lsr "$a" $((WIDTH - n)); RES=$((((a << n) | R) & MASK)); outv=$R outw=$n; else RES=$a; fi
+		sym="rol" ;;
+	ROR)
+		if ((n)); then lsr "$a" "$n"; RES=$((((a << (WIDTH - n)) | R) & MASK)); outv=$((a & ((1 << n) - 1))) outw=$n; else RES=$a; fi
+		sym="ror" ;;
+	esac
+	((VERBOSE)) || return 0
+	title "$araw $op $braw   [${WIDTH}-bit]"
+	operand_row "$araw" "$a"
+	row "" "$sym $n" "$note" "$BOLD"
+	res_rows
+	if ((outw)); then
+		bits "$outv" "$outw"
+		if ((rot)); then hdr="(wrapped around to the other end)"
+		else hdr="(shifted out; last bit out -> C=$cbit)"; fi
+		row "out" "$BITS" "$hdr" "$YELLOW"
+	fi
+	flush_rows
+	((TRUTH)) && shift_map "$eff" "$n" "$a"
+	return 0
+}
+
+neg_trace() {
+	local x=$1 inv one=1 i c=0 cs="" ba bi
+	inv=$(((~x) & MASK))
+	for ((i = 0; i < WIDTH; i++)); do
+		ba=$(((inv >> i) & 1)) bi=$(((one >> i) & 1))
+		if ((c)); then cs="1$cs"; else cs=" $cs"; fi
+		c=$(((ba & bi) | (c & (ba ^ bi))))
+	done
+	group "$cs"; row "carry" "$GB" "" "$CYAN" ":"
+	operand_row "$NEG_LABEL" "$x"
+	gbits "$inv"; row "1comp" "$GB" "(invert every bit)" "$CYAN"
+	gbits "$one"; row "+1" "$GB" "" "$CYAN"
+}
+
+op_unary() {
+	local op=$1 a=$2 araw=$3 n i c=0 out=0 bytes x pos="" lead=0
+	SIGNED_MODE_KEEP=$SIGNED_MODE
+	case $op in
+	NOT | 1COMP) RES=$(((~a) & MASK)) ;;
+	NEG) RES=$(((-a) & MASK)) ;;
+	2COMP) RES=$a ;;
+	POPCNT | PARITY)
+		n=$a
+		while ((n != 0)); do
+			c=$((c + (n & 1)))
+			lsr "$n" 1; n=$R
+		done
+		for ((i = WIDTH - 1; i >= 0; i--)); do (((a >> i) & 1)) && pos+="$i "; done
+		if [[ $op == POPCNT ]]; then RES=$c; else RES=$((c & 1)); fi
+		SIGNED_MODE=0 ;;
+	CLZ)
+		for ((i = WIDTH - 1; i >= 0; i--)); do (((a >> i) & 1)) && break; lead=$((lead + 1)); done
+		RES=$lead; SIGNED_MODE=0 ;;
+	CTZ)
+		for ((i = 0; i < WIDTH; i++)); do (((a >> i) & 1)) && break; lead=$((lead + 1)); done
+		RES=$lead; SIGNED_MODE=0 ;;
+	REV)
+		for ((i = 0; i < WIDTH; i++)); do out=$((out | (((a >> i) & 1) << (WIDTH - 1 - i)))); done
+		RES=$out ;;
+	BSWAP)
+		((WIDTH >= 16 && WIDTH % 8 == 0)) || die "BSWAP needs a width that is a multiple of 8, at least 16 (use --width 16/32/64)"
+		bytes=$((WIDTH / 8))
+		for ((i = 0; i < bytes; i++)); do out=$((out | (((a >> (8 * i)) & 0xFF) << (8 * (bytes - 1 - i))))); done
+		RES=$((out & MASK)) ;;
+	esac
+	((VERBOSE)) || { SIGNED_MODE=$SIGNED_MODE_KEEP; return 0; }
+	title "$op $araw   [${WIDTH}-bit]"
+	case $op in
+	NOT | 1COMP)
+		operand_row "$araw" "$a"
+		row "" "$op  (flip every bit)" "" "$BOLD"
+		res_rows ;;
+	NEG)
+		NEG_LABEL=$araw
+		neg_trace "$a"
+		rule
+		gbits "$RES"; row "NEG" "$GB" "(-x = ~x + 1)" "$GREEN"
+		res_rows ;;
+	2COMP)
+		if ((NUM_NEG)); then
+			NEG_LABEL="abs($araw)"
+			neg_trace $((NUM_ABS & MASK))
+			rule
+			gbits "$RES"; row "2comp" "$GB" "(bit pattern of $araw)" "$GREEN"
+		else
+			operand_row "$araw" "$a"
+			row "" "" "(non-negative: its two's complement pattern is itself)" ""
+		fi
+		res_rows ;;
+	POPCNT | PARITY)
+		operand_row "$araw" "$a"
+		row "ones" "$c" "(at bits: ${pos:-none})" "$YELLOW"
+		res_rows ;;
+	CLZ | CTZ)
+		operand_row "$araw" "$a"
+		row "$op" "$RES" "($([[ $op == CLZ ]] && echo leading || echo trailing) zero bits; $WIDTH if the value is 0)" "$YELLOW"
+		res_rows ;;
+	REV)
+		operand_row "$araw" "$a"
+		row "" "REV  (mirror the bit order)" "" "$BOLD"
+		res_rows ;;
+	BSWAP)
+		bits "$a"; x=$BITS; pos=""
+		for ((i = 0; i < ${#x}; i += 8)); do pos+="${x:i:8} "; done
+		row "$araw" "${pos% }" "" "$CYAN"
+		row "" "BSWAP  (reverse byte order)" "" "$BOLD"
+		bits "$RES"; x=$BITS; pos=""
+		for ((i = 0; i < ${#x}; i += 8)); do pos+="${x:i:8} "; done
+		rule
+		row "ans" "${pos% }" "" "$GREEN"
+		dec_disp "$RES"; row "ans_dec" "$DD" "" "$GREEN"
+		printf -v pos '0x%0*X' $((WIDTH / 4)) "$a"; printf -v x '0x%0*X' $((WIDTH / 4)) "$RES"
+		row "hex" "$pos -> $x" "" "$DIM" ;;
+	esac
+	flush_rows
+	((TRUTH)) && [[ $op == NOT || $op == 1COMP ]] && truth_table NOT "$a"
+	SIGNED_MODE=$SIGNED_MODE_KEEP
+	return 0
+}
+
+op_convert() { # raw p
+	local raw=$1 p=$2 i w="" sum="" u
+	RES=$p
+	((VERBOSE)) || return 0
+	title "convert $raw   [${WIDTH}-bit]"
+	row "input" "$raw" "" "$CYAN"
+	gbits "$p"; row "bin" "$GB" "" "$CYAN"
+	printf -v u '0o%o' "$p"; row "oct" "$u" "" "$CYAN"
+	printf -v u '0x%0*X' $(((WIDTH + 3) / 4)) "$p"; row "hex" "$u" "" "$CYAN"
+	printf -v u '%u' "$p"; row "dec" "$u" "" "$GREEN"
+	for ((i = WIDTH - 1; i >= 0; i--)); do
+		if (((p >> i) & 1)); then
+			printf -v w '%u' $((1 << i))
+			sum+="${sum:+ + }$w"
+		fi
+	done
+	[[ -z $sum ]] && sum=0
+	row "weights" "$sum" "(sum of the set bit weights)" "$DIM"
+	case $TO_BASE in
+	bcd) format_result "$p"; row "bcd" "$FMT" "(one nibble per decimal digit)" "$GREEN" ;;
+	gray)
+		lsr "$p" 1; gbits "$R"; row "bin>>1" "$GB" "" "$CYAN"
+		gbits $((p ^ R)); row "gray" "$GB" "(bin XOR bin>>1)" "$GREEN" ;;
+	esac
+	flush_rows
+}
+
+# --------------------------------------------------------------- fractions --
+convert_fraction() {
+	local raw=$1 ip fp len scale val i bit prod res="" dig w
+	[[ $raw =~ ^[0-9]+\.[0-9]+$ ]] || die "'$raw' is not a valid fractional number"
+	ip=${raw%.*} fp=${raw#*.}
+	len=${#fp}
+	((len <= 18)) || die "at most 18 fractional digits are supported"
+	if [[ $FROM_N == 2 ]]; then
+		# binary fraction -> exact decimal
+		[[ $ip =~ ^[01]+$ && $fp =~ ^[01]+$ ]] || die "'$raw' is not a binary fraction"
+		local num=$((2#$fp)) p5=1 ipv=$((2#$ip)) digits
+		for ((i = 0; i < len; i++)); do p5=$((p5 * 5)); done
+		printf -v digits '%0*d' "$len" $((num * p5))
+		digits=${digits%"${digits##*[!0]}"}
+		[[ -z $digits ]] && digits=""
+		res="$ipv${digits:+.$digits}"
+		if ((VERBOSE)); then
+			local parts="" wt
+			((ipv)) && parts="$ipv"
+			for ((i = 1; i <= len; i++)); do
+				if [[ ${fp:i-1:1} == 1 ]]; then
+					p5=1; for ((w = 0; w < i; w++)); do p5=$((p5 * 5)); done
+					printf -v wt '0.%0*d' "$i" "$p5"
+					parts+="${parts:+ + }$wt"
+				fi
+			done
+			title "binary fraction $raw"
+			row "weights" "${parts:-0}" "(each 1 after the point is 2^-position)" "$CYAN"
+			row "ans_dec" "$res" "" "$GREEN"
+			flush_rows
+		else
+			printf '%s\n' "$res"
+		fi
+		return 0
+	fi
+	[[ $TO_BASE == dec || $TO_BASE == bin ]] || die "fractional input can only be shown in binary (--to bin)"
+	[[ -n $FROM_BASE && $FROM_N != 10 ]] && die "fractional input is supported for decimal (default) and binary (-f bin)"
+	prep_width "$ip"
+	parse_number "$ip"
+	((VERBOSE)) && title "decimal fraction $raw  ->  binary (${PRECISION} fractional bits)"
+	scale=$((10 ** len))
+	val=$((10#$fp))
+	((VERBOSE)) && printf '  %-14s %-14s %s\n' "fraction" "x 2" "bit"
+	for ((i = 0; i < PRECISION; i++)); do
+		local before=$val
+		val=$((val * 2))
+		if ((val >= scale)); then bit=1; val=$((val - scale)); else bit=0; fi
+		res+="$bit"
+		if ((VERBOSE)); then
+			printf -v prod '%0*d' $((len + 1)) $((before * 2))
+			printf -v dig '%0*d' $((len + 1)) "$before"
+			printf '  0.%-12s %-14s %s\n' "${dig:1}" "${prod:0:${#prod}-len}.${prod: -len}" "$bit"
+		fi
+		((val == 0)) && break
+	done
+	gbits "$NUM_P"
+	if ((VERBOSE)); then
+		((val != 0)) && printf '  (truncated after %d bits; try --prec for more)\n' "$PRECISION"
+		printf '\n'
+		row "integer" "$GB" "(${ip})" "$CYAN"
+		row "fraction" ".$res" "(0.${fp})" "$CYAN"
+		rule
+		row "ans" "$GB.$res" "" "$GREEN"
+		flush_rows
+	else
+		printf '%s.%s\n' "$BITS" "$res"
+	fi
+}
+
+norm_op() {
+	case ${1^^} in
+	ADD | +) NORM=ADD ;; SUB | -) NORM=SUB ;; MUL | '*') NORM=MUL ;;
+	DIV | /) NORM=DIV ;; MOD | %) NORM=MOD ;;
+	AND | '&') NORM=AND ;; OR | '|') NORM=OR ;; XOR | '^') NORM=XOR ;;
+	NAND) NORM=NAND ;; NOR) NORM=NOR ;; XNOR) NORM=XNOR ;;
+	LSHIFT | SHL | '<<') NORM=LSHIFT ;; RSHIFT | SHR | '>>') NORM=RSHIFT ;;
+	ASR | ASHIFT | '>>>') NORM=ASR ;;
+	ROL | ROLL) NORM=ROL ;; ROR) NORM=ROR ;;
+	NOT | '~') NORM=NOT ;; 1COMP) NORM=1COMP ;; 2COMP) NORM=2COMP ;; NEG) NORM=NEG ;;
+	BSWAP) NORM=BSWAP ;; POPCNT | POPCOUNT) NORM=POPCNT ;;
+	CLZ) NORM=CLZ ;; CTZ) NORM=CTZ ;; REV) NORM=REV ;; PARITY) NORM=PARITY ;;
+	*) return 1 ;;
+	esac
+}
+is_binary() { case $1 in ADD | SUB | MUL | DIV | MOD | AND | OR | XOR | NAND | NOR | XNOR | LSHIFT | RSHIFT | ASR | ROL | ROR) return 0 ;; esac; return 1; }
+is_unary() { case $1 in NOT | 1COMP | 2COMP | NEG | BSWAP | POPCNT | CLZ | CTZ | REV | PARITY) return 0 ;; esac; return 1; }
+is_shift() { case $1 in LSHIFT | RSHIFT | ASR | ROL | ROR) return 0 ;; esac; return 1; }
+
+resolve_output() {
+	if ((VERBOSE < 0)); then
+		if [[ -t 1 ]]; then VERBOSE=1; else VERBOSE=0; fi
+	fi
+	init_colors
+}
+
+record_answer() {
+	local s
+	dec_disp "$RES"
+	s=$DD
+	ANS=$s
+	[[ -n $ANS_FILE ]] && printf '%s' "$s" >"$ANS_FILE"
+	return 0
+}
+
+dispatch() {
+	local n=${#ARGS[@]} op a b
+	if ((n == 0)); then usage; return 0; fi
+	resolve_output
+	SIGNED_MODE=0
+	case $n in
+	1)
+		if norm_op "${ARGS[0]}"; then
+			op=$NORM
+			if is_binary "$op" && ! is_shift "$op" && [[ $op != ADD && $op != SUB && $op != MUL && $op != DIV && $op != MOD ]]; then
+				TRUTH=1; VERBOSE=1; init_colors
+				prep_width 0; truth_table "$op"; return 0
+			elif [[ $op == NOT ]]; then
+				TRUTH=1; VERBOSE=1; init_colors
+				prep_width 0; truth_table NOT; return 0
+			fi
+			die "operator '${ARGS[0]}' needs operands (e.g. bitcalc 10 $op 3)"
+		fi
+		if [[ ${ARGS[0]} =~ ^-?[0-9]+\.[0-9]+$ || (${ARGS[0]} == *.* && $FROM_N == 2) ]]; then
+			[[ ${ARGS[0]} == -* ]] && die "cannot convert negative fractions"
+			convert_fraction "${ARGS[0]}"; return 0
+		fi
+		prep_width "${ARGS[0]}"
+		parse_number "${ARGS[0]}"
+		if ((NUM_NEG)); then
+			((UNSIGNED)) || SIGNED_MODE=1
+			op_unary 2COMP "$NUM_P" "${ARGS[0]}"
+		else
+			op_convert "${ARGS[0]}" "$NUM_P"
+		fi
+		;;
+	2)
+		if norm_op "${ARGS[0]}" && is_unary "$NORM"; then op=$NORM a=${ARGS[1]}
+		elif norm_op "${ARGS[1]}" && is_unary "$NORM"; then op=$NORM a=${ARGS[0]}
+		else die "expected '<UNARY_OP> <NUMBER>' or '<NUMBER> <UNARY_OP>' (got '${ARGS[0]} ${ARGS[1]}')"; fi
+		prep_width "$a"
+		parse_number "$a"
+		if ((NUM_NEG && !UNSIGNED)) || [[ $op == NEG ]]; then SIGNED_MODE=1; fi
+		((UNSIGNED)) && SIGNED_MODE=0
+		op_unary "$op" "$NUM_P" "$a"
+		;;
+	3)
+		norm_op "${ARGS[1]}" && is_binary "$NORM" || die "unknown operator '${ARGS[1]}' (see --help)"
+		op=$NORM
+		if is_shift "$op"; then
+			prep_width "${ARGS[0]}"
+			parse_number "${ARGS[0]}"; a=$NUM_P
+			[[ ${ARGS[0]} == -* ]] && SIGNED_MODE=1
+			parse_count "${ARGS[2]}"; b=$COUNT
+			((UNSIGNED)) && SIGNED_MODE=0
+			op_shift "$op" "$a" "$b" "${ARGS[0]}" "${ARGS[2]}"
+		else
+			prep_width "${ARGS[0]}" "${ARGS[2]}"
+			parse_number "${ARGS[0]}"; a=$NUM_P
+			parse_number "${ARGS[2]}"; b=$NUM_P
+			[[ ${ARGS[0]} == -* || ${ARGS[2]} == -* ]] && SIGNED_MODE=1
+			((UNSIGNED)) && SIGNED_MODE=0
+			case $op in
+			ADD | SUB)
+				# a result below zero is shown signed (3 SUB 5 = -2, not 254)
+				if [[ $op == SUB ]] && ((!UNSIGNED)) && ult "$a" "$b"; then SIGNED_MODE=1; fi
+				op_addsub "$op" "$a" "$b" "${ARGS[0]}" "${ARGS[2]}" ;;
+			MUL) op_mul "$a" "$b" "${ARGS[0]}" "${ARGS[2]}" ;;
+			DIV | MOD) op_div "$op" "$a" "$b" "${ARGS[0]}" "${ARGS[2]}" ;;
+			*) op_logic "$op" "$a" "$b" "${ARGS[0]}" "${ARGS[2]}" ;;
+			esac
+		fi
+		;;
+	*) die "too many arguments (expected: NUMBER OPERATOR NUMBER)" ;;
+	esac
+	((VERBOSE)) || { format_result "$RES"; printf '%s\n' "$FMT"; }
+	record_answer
+}
+
+set_from() { base_num "$1" || { printf "bitcalc: error: unknown input base '%s' (bin|oct|dec|hex)\n" "$1" >&2; return 1; }; FROM_BASE=${1,,}; FROM_N=$BASE_N; }
+set_to() {
+	case ${1,,} in
+	bin | 2) TO_BASE=bin ;; oct | 8) TO_BASE=oct ;; dec | 10) TO_BASE=dec ;;
+	hex | 16) TO_BASE=hex ;; bcd) TO_BASE=bcd ;; gray) TO_BASE=gray ;;
+	*) printf "bitcalc: error: unknown output base '%s' (bin|oct|dec|hex|bcd|gray)\n" "$1" >&2; return 1 ;;
+	esac
+}
+set_width_opt() {
+	if [[ ${1,,} == auto ]]; then WIDTH_SET=0; return 0; fi
+	[[ $1 =~ ^[0-9]+$ ]] && (($1 >= 2 && $1 <= 64)) ||
+		{ printf "bitcalc: error: width must be an integer from 2 to 64 (got '%s')\n" "$1" >&2; return 1; }
+	WIDTH_SET=1
+	set_width "$1"
+}
+set_prec() {
+	[[ $1 =~ ^[0-9]+$ ]] && (($1 >= 1 && $1 <= 60)) ||
+		{ printf "bitcalc: error: --prec must be 1..60 (got '%s')\n" "$1" >&2; return 1; }
+	PRECISION=$1
+}
+
+parse_flags() {
+	ARGS=()
+	local opt
+	while (($# > 0)); do
+		opt=$1
+		case $opt in
+		-f | --from | -t | --to | -w | --width | --prec)
+			(($# >= 2)) || die "option '$opt' needs a value"
+			;;&
+		-f | --from) set_from "$2" || exit 1; shift 2 ;;
+		-t | --to) set_to "$2" || exit 1; shift 2 ;;
+		-w | --width) set_width_opt "$2" || exit 1; shift 2 ;;
+		--prec) set_prec "$2" || exit 1; shift 2 ;;
+		--from=*) set_from "${opt#*=}" || exit 1; shift ;;
+		--to=*) set_to "${opt#*=}" || exit 1; shift ;;
+		--width=*) set_width_opt "${opt#*=}" || exit 1; shift ;;
+		--prec=*) set_prec "${opt#*=}" || exit 1; shift ;;
+		-q | --quiet) VERBOSE=0; shift ;;
+		-v | --verbose) VERBOSE=1; shift ;;
+		-T | --truth) TRUTH=1; shift ;;
+		-u | --unsigned) UNSIGNED=1; shift ;;
+		--no-color) USE_COLOR=0; shift ;;
+		--color) USE_COLOR=1; shift ;;
+		-i | --interactive) INTERACTIVE=1; shift ;;
+		-V | --version) printf 'bitcalc %s\n' "$VERSION"; exit 0 ;;
+		-h | --help) usage; exit 0 ;;
+		--) shift; ARGS+=("$@"); break ;;
+		-[0-9]* | -) ARGS+=("$opt"); shift ;;
+		-*) die "unknown option '$opt' (see --help)" ;;
+		*) ARGS+=("$opt"); shift ;;
+		esac
+	done
+}
+
+# ------------------------------------------------------------------- REPL --
+repl_help() {
+	cat <<'EOF'
+Type an expression such as:  10 AND 12   |   0xFF ROL -3   |   NOT 0b1010
+  ans                 the previous result
+  :width N|auto       register width          :to BASE    output base
+  :from BASE|auto     input base              :truth on|off
+  :verbose on|off     show / hide the working :unsigned on|off
+  :state              show current settings   help, clear, exit (or :q)
+Flags also work per line, e.g.  -w 16 -t hex 0xABCD BSWAP
+EOF
+}
+
+repl_onoff() { # VAR value
+	case ${2,,} in
+	on | 1 | yes) printf -v "$1" '%s' 1 ;;
+	off | 0 | no) printf -v "$1" '%s' 0 ;;
+	*) echo "use on or off" ;;
+	esac
+}
+
+start_repl() {
+	local line prompt hist="" i cmd arg
+	local -a toks
+	VERBOSE=1
+	init_colors
+	ANS_FILE=$(mktemp "${TMPDIR:-/tmp}/bitcalc.XXXXXX") || die "cannot create a temp file"
+	trap 'rm -f "$ANS_FILE"' EXIT
+	[[ -n ${HOME:-} ]] && hist=${XDG_STATE_HOME:-$HOME/.local/state}/bitcalc/history
+	if [[ -n $hist ]] && mkdir -p "${hist%/*}" 2>/dev/null; then
+		set -o history
+		HISTFILE=$hist HISTSIZE=1000
+		history -c
+		history -r "$hist" 2>/dev/null || true
+	else
+		hist=""
+	fi
+	prompt=$'\001\033[36m\002bitcalc> \001\033[0m\002'
+	((USE_COLOR == 1)) || prompt='bitcalc> '
+	printf '%sbitcalc %s%s  (help for commands, exit to quit)\n' "$BOLD" "$VERSION" "$RESET"
+	while IFS= read -r -e -p "$prompt" line; do
+		[[ -z ${line//[[:space:]]/} ]] && continue
+		[[ -n $hist ]] && history -s -- "$line"
+		read -ra toks <<<"$line"
+		cmd=${toks[0],,} arg=${toks[1]-}
+		case $cmd in
+		exit | quit | :q) break ;;
+		clear) clear; continue ;;
+		help | :help) repl_help; continue ;;
+		:width | :w) set_width_opt "$arg" || true; continue ;;
+		:to | :t) set_to "$arg" || true; continue ;;
+		:from | :f) if [[ ${arg,,} == auto ]]; then FROM_BASE="" FROM_N=0; else set_from "$arg" || true; fi; continue ;;
+		:truth) repl_onoff TRUTH "$arg"; continue ;;
+		:unsigned) repl_onoff UNSIGNED "$arg"; continue ;;
+		:verbose) repl_onoff VERBOSE "$arg"; init_colors; continue ;;
+		:state)
+			printf 'width=%s%s  from=%s  to=%s  truth=%s  verbose=%s  unsigned=%s  ans=%s\n' \
+				"$WIDTH" "$( ((WIDTH_SET)) || echo ' (auto)')" "${FROM_BASE:-auto}" "$TO_BASE" "$TRUTH" "$VERBOSE" "$UNSIGNED" "${ANS:-none}"
+			continue ;;
+		:*) echo "unknown command '$cmd' (try help)"; continue ;;
+		esac
+		for ((i = 0; i < ${#toks[@]}; i++)); do
+			if [[ ${toks[i],,} == ans ]]; then
+				if [[ -z $ANS ]]; then echo "no previous result yet"; continue 2; fi
+				toks[i]=$ANS
+			fi
+		done
+		(
+			parse_flags "${toks[@]}"
+			dispatch
+		) || true
+		[[ -s $ANS_FILE ]] && ANS=$(<"$ANS_FILE")
+	done
+	[[ -n $hist ]] && history -w "$hist" 2>/dev/null
+	echo
+}
+
+# ------------------------------------------------------------------- main --
+main() {
+	local line word
+	parse_flags "$@"
+	if ((INTERACTIVE)); then
+		if [[ ! -t 0 ]]; then die "interactive mode needs a terminal on stdin"; fi
+		start_repl
+		return 0
+	fi
+	if ((${#ARGS[@]} == 0)); then
+		if [[ ! -t 0 ]]; then
+			while IFS= read -r line || [[ -n $line ]]; do
+				read -ra words <<<"$line"
+				for word in "${words[@]+"${words[@]}"}"; do ARGS+=("$word"); done
+			done
+		else
+			usage
+			return 0
+		fi
+	fi
+	dispatch
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+	main "$@"
+fi
