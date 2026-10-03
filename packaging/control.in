@@ -1,0 +1,15 @@
+Package: bitcalc
+Version: @VERSION@
+Architecture: all
+Maintainer: Nyang'ada Stone Bradley <ridddle5050@gmail.com>
+Installed-Size: @SIZE@
+Depends: bash (>= 4.4)
+Section: utils
+Priority: optional
+Homepage: https://github.com/ridddle-en/bitcalc
+Description: bitwise calculator and base converter with step-by-step output
+ Hardware-engineering toolkit: binary arithmetic with carry/borrow/overflow
+ flags, logic  operations with truth tables, shifts and rotates (negative
+ counts reverse direction), two's complement, byte swap, population count, 
+ BCD/Gray code and fractional base conversion. Shows the working as aligned
+ bit rows, or prints only the answer for use in pipelines.
