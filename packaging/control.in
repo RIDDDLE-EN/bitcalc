@@ -9,7 +9,7 @@ Priority: optional
 Homepage: https://github.com/ridddle-en/bitcalc
 Description: bitwise calculator and base converter with step-by-step output
  Hardware-engineering toolkit: binary arithmetic with carry/borrow/overflow
- flags, logic  operations with truth tables, shifts and rotates (negative
- counts reverse direction), two's complement, byte swap, population count, 
+ flags, logic operations with truth tables, shifts and rotates (negative
+ counts reverse direction), two's complement, byte swap, population count,
  BCD/Gray code and fractional base conversion. Shows the working as aligned
  bit rows, or prints only the answer for use in pipelines.

@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>bitcalc APT repository</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:46rem;margin:3rem auto;padding:0 1rem}
+pre{background:#111;color:#eee;padding:.8rem 1rem;border-radius:6px;overflow-x:auto}</style></head>
+<body>
+<h1>bitcalc</h1>
+<p>Bitwise calculator and base converter with step-by-step output.</p>
+<h2>Install</h2><pre>curl -fsSL @BASE_URL@/install.sh | bash</pre>
+<h2>Uninstall</h2><pre>curl -fsSL @BASE_URL@/uninstall.sh | bash</pre>
+<h2>Manual setup</h2>
+<pre>sudo install -D -m 644 &lt;(curl -fsSL @BASE_URL@/bitcalc-archive-keyring.gpg) /usr/share/keyrings/bitcalc-archive-keyring.gpg
+echo "Types: deb
+URIs: @BASE_URL@
+Suites: ./
+Signed-By: /usr/share/keyrings/bitcalc-archive-keyring.gpg" | sudo tee /etc/apt/sources.list.d/bitcalc.sources
+sudo apt update &amp;&amp; sudo apt install bitcalc</pre>
+<p>Signing key fingerprint: <code>@FINGERPRINT@</code></p>
+</body></html>
