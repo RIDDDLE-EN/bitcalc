@@ -1,0 +1,181 @@
+.TH BITCALC 1 "@DATE@" "bitcalc @VERSION@" "User Commands"
+.SH NAME
+bitcalc \- bitwise operations, binary arithmetic and base conversion with step\-by\-step visualisation
+.SH SYNOPSIS
+.B bitcalc
+[\fIFLAGS\fR] \fINUMBER\fR
+.br
+.B bitcalc
+[\fIFLAGS\fR] \fINUMBER\fR \fIOPERATOR\fR \fINUMBER\fR
+.br
+.B bitcalc
+[\fIFLAGS\fR] \fIUNARY_OPERATOR\fR \fINUMBER\fR
+.br
+.B bitcalc
+[\fIFLAGS\fR] \fINUMBER\fR \fIUNARY_OPERATOR\fR
+.br
+.B echo
+"\fIEXPRESSION\fR" |
+.B bitcalc
+[\fIFLAGS\fR]
+.br
+.B bitcalc \-i
+.SH DESCRIPTION
+.B bitcalc
+is a hardware\-engineering calculator. It treats every number as a fixed\-width
+register, shows the working as aligned bit rows (carries, shifted\-out bits, flags,
+truth tables) and can print just the answer for use in scripts.
+.PP
+When standard output is a terminal the working is shown. When it is not (a pipe or
+a redirect) only the result is printed, exactly as with
+.BR \-\-quiet ,
+unless
+.B \-\-verbose
+is given.
+.SS Number syntax
+Prefixes select the base: \fB0b\fR1010 (binary), \fB0o\fR17 (octal), \fB0x\fR1F (hexadecimal);
+no prefix means decimal unless \fB\-\-from\fR is given. A leading \fB\-\fR makes the value
+negative (two's complement). Decimal input may have a fractional part (\fB13.625\fR);
+binary input with \fB\-\-from bin\fR may too (\fB1101.101\fR).
+.PP
+Hexadecimal digits can spell operator names (ADD, AND, ...). Use the \fB0x\fR prefix
+for such values.
+.SS Width
+The register width is the smallest of 8, 16, 32 or 64 bits that holds every operand,
+unless \fB\-\-width\fR is given. Results wrap to the width and the
+.B flags
+row reports Z (zero), N (sign bit), C (carry, or B for borrow on SUB) and V (signed overflow).
+.SS Signed and unsigned display
+Decimal results are shown unsigned unless an operand is negative (or the operation is
+NEG, or SUB borrowed), in which case they are shown signed. The other interpretation is
+always printed next to it. \fB\-\-unsigned\fR forces the unsigned view.
+.SH FLAGS
+.TP
+\fB\-f\fR, \fB\-\-from\fR \fIBASE\fR
+Input base: bin, oct, dec, hex (or 2, 8, 10, 16).
+.TP
+\fB\-t\fR, \fB\-\-to\fR \fIBASE\fR
+Output base: bin, oct, dec, hex, bcd, gray. Default: dec.
+.TP
+\fB\-w\fR, \fB\-\-width\fR \fIBITS\fR
+Register width, 2 to 64. \fBauto\fR restores automatic selection.
+.TP
+\fB\-\-prec\fR \fIN\fR
+Fractional bits produced when converting a decimal fraction to binary. Default: 8.
+.TP
+\fB\-q\fR, \fB\-\-quiet\fR
+Print only the final value.
+.TP
+\fB\-v\fR, \fB\-\-verbose\fR
+Always print the working, even when output is not a terminal.
+.TP
+\fB\-T\fR, \fB\-\-truth\fR
+Add a truth table (logic operators, NOT) or a bit\-mapping table (shifts and rotates).
+With only a logic operator and no operands, prints its plain truth table.
+.TP
+\fB\-u\fR, \fB\-\-unsigned\fR
+Show decimal results unsigned.
+.TP
+\fB\-\-no\-color\fR, \fB\-\-color\fR
+Disable or force colour. The NO_COLOR environment variable is honoured.
+.TP
+\fB\-i\fR, \fB\-\-interactive\fR
+Start the interactive shell (see INTERACTIVE MODE).
+.TP
+\fB\-V\fR, \fB\-\-version\fR
+Print the version.
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print a short usage summary.
+.SH OPERATORS
+Operators are case\-insensitive. Symbols may be used for the common ones; quote
+.BR '*' ,
+.BR '&' ,
+.BR '|' ,
+.BR '<<'
+and
+.BR '>>'
+in the shell.
+.TP
+.B Arithmetic
+ADD (+), SUB (\-), MUL (*), DIV (/), MOD (%).
+Division and remainder use signed values when an operand is negative and unsigned values otherwise;
+unsigned 64\-bit operands above 2^63\-1 are not supported for DIV and MOD.
+.TP
+.B Logic
+AND (&), OR (|), XOR (^), NAND, NOR, XNOR.
+.TP
+.B Shifts
+LSHIFT (<<), RSHIFT (>>, logical), ASR (>>>, arithmetic, copies the sign bit).
+A shift count equal to or larger than the width is an error.
+.TP
+.B Rotates
+ROL, ROR. The count is taken modulo the width.
+.TP
+.B Direction of negative counts
+A negative count runs the opposite operation: LSHIFT \-n is RSHIFT n, RSHIFT \-n is LSHIFT n,
+ROL \-n is ROR n, ROR \-n is ROL n, and ASR \-n is LSHIFT n. The working states when this happens.
+.TP
+.B Unary
+NOT (~) and 1COMP flip every bit.
+2COMP shows the two's\-complement bit pattern of a number (a negative number is built by inverting its
+magnitude and adding one; a non\-negative number is unchanged).
+NEG negates (invert, add one).
+BSWAP reverses byte order (width 16, 24, ... 64).
+POPCNT counts 1 bits, PARITY is that count modulo 2, CLZ and CTZ count leading and trailing zero bits,
+REV mirrors the bit order.
+.SH INTERACTIVE MODE
+.B bitcalc \-i
+starts a shell with history (kept in
+.IR $XDG_STATE_HOME/bitcalc/history ).
+Any expression or flag combination accepted on the command line works, plus:
+.TP
+.B ans
+the previous result.
+.TP
+\fB:width\fR \fIN|auto\fR, \fB:to\fR \fIBASE\fR, \fB:from\fR \fIBASE|auto\fR
+change settings for the session.
+.TP
+\fB:truth\fR \fIon|off\fR, \fB:verbose\fR \fIon|off\fR, \fB:unsigned\fR \fIon|off\fR
+toggle options.
+.TP
+.B :state, help, clear, exit
+show settings, help, clear the screen, quit (also \fB:q\fR).
+.SH EXAMPLES
+.TP
+Show the working for a bitwise AND with a negative operand:
+bitcalc 10 AND \-2
+.TP
+Hexadecimal result of an addition in a pipeline:
+bitcalc \-q 10 LSHIFT 2 | bitcalc \-t hex
+.TP
+Rotate; the negative count rotates the other way and a bit\-mapping table is added:
+bitcalc \-T 0b10110001 ROL \-3
+.TP
+Byte\-swap a 16\-bit value:
+bitcalc \-w 16 0xABCD BSWAP
+.TP
+Bit pattern of a negative number in hexadecimal:
+bitcalc \-w 16 2COMP \-10 \-\-to hex
+.TP
+Decimal fraction to binary with 12 fractional bits:
+bitcalc \-\-prec 12 13.625
+.TP
+Truth table of XNOR:
+bitcalc \-T XNOR
+.TP
+Binary coded decimal:
+bitcalc \-\-to bcd 94
+.SH EXIT STATUS
+0 on success, 1 on any error (message on standard error).
+.SH ENVIRONMENT
+.TP
+.B NO_COLOR
+Disable colour output.
+.TP
+.B XDG_STATE_HOME
+Location of the interactive history (default ~/.local/state).
+.SH AUTHOR
+Nyang'ada Stone Bradley
+.SH SEE ALSO
+.BR bash (1)
