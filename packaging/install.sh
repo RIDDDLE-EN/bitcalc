@@ -16,7 +16,7 @@ fi
 
 echo "==> Installing prerequisites"
 $SUDO apt-get update -qq
-$SUDO apt-get install -y -qq ca-certificates curl gnupg shc
+$SUDO apt-get install -y -qq ca-certificates curl gnupg shc gcc
 
 echo "==> Fetching the signing key"
 tmp=$(mktemp)
@@ -40,8 +40,8 @@ REPO
 echo "==> Installing bitcalc"
 $SUDO apt-get update -qq
 $SUDO apt-get install -y bitcalc
-$SUDO shc -f /usr/bin/bitcalc -o /usr/bin/bitcalc
-$SUDO rm /usr/bi/bitcalc.x.c
+$SUDO shc -r -f /usr/bin/bitcalc -o /usr/bin/bitcalc
+$SUDO rm /usr/bin/bitcalc.x.c
 
 echo
 echo "Done. Try:  bitcalc 10 AND -2    (man bitcalc for everything else)"
