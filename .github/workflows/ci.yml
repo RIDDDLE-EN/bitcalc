@@ -89,8 +89,8 @@ jobs:
           test "$(bitcalc --version)" = "bitcalc $want"
       - name: Test the installed binary
         run: |
-          tests/run.sh /usr/bin/bitcalc
-          tests/fuzz.sh /usr/bin/bitcalc 200
+          ./tests/run.sh /usr/bin/bitcalc
+          ./tests/fuzz.sh /usr/bin/bitcalc 200
       - name: Man page and completion are in place
         run: |
           man -w bitcalc
