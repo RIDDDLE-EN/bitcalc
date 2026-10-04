@@ -68,6 +68,9 @@ jobs:
         image: ["ubuntu:22.04", "ubuntu:24.04", "debian:12"]
     container: ${{ matrix.image }}
     steps:
+      - name: Install git
+        run: apt-get update -qq && apt-get install -y -qq git
+
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
