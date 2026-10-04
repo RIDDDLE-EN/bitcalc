@@ -93,6 +93,9 @@ jobs:
       matrix:
         image: ["ubuntu:22.04", "ubuntu:24.04", "debian:12"]
     container: ${{ matrix.image }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Install with the public one-liner
         run: |
